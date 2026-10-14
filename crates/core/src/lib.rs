@@ -4,13 +4,17 @@
 //! classified (`classify`), deduplicated by BLAKE3 (`dedup`) and searched fuzzily (`search`).
 
 pub mod classify;
+pub mod clipfmt;
 pub mod config;
 pub mod crypto;
 pub mod dedup;
 pub mod error;
 pub mod history;
+pub mod hotkey;
+pub mod i18n;
 pub mod model;
 pub mod search;
+pub mod timefmt;
 pub mod vault;
 
 pub use error::{Error, Result};

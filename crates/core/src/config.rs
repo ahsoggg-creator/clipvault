@@ -36,6 +36,8 @@ pub struct Settings {
     pub last_update_check: u64,
     /// Global hotkey that opens the popup, e.g. `Ctrl+Alt+V`.
     pub hotkey: String,
+    /// Hotkey of the elevated helper window (`Clipvault.exe --admin`).
+    pub admin_hotkey: String,
     /// Recording is paused (survives restarts).
     pub paused: bool,
     /// Largest entry that is stored, in kilobytes.
@@ -53,6 +55,7 @@ impl Default for Settings {
             auto_update: true,
             last_update_check: 0,
             hotkey: "Ctrl+Alt+V".into(),
+            admin_hotkey: "Ctrl+Alt+Shift+V".into(),
             paused: false,
             max_item_kb: 16 * 1024,
             max_age_days: 0,

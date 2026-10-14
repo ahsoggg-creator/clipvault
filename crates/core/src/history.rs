@@ -58,6 +58,8 @@ pub struct Query {
 struct Slot {
     item: Item,
     lower: String,
+    /// Position in the order of changes: breaks ties between entries used in the same second.
+    order: u64,
 }
 
 pub struct History {
@@ -67,6 +69,7 @@ pub struct History {
     /// Blobs of entries that have no vault behind them (in-memory entries, the demo).
     mem_blobs: HashMap<u64, Vec<u8>>,
     next_id: u64,
+    rev: u64,
 }
 
 fn lower_of(item: &Item) -> String {
@@ -86,6 +89,7 @@ impl History {
             by_hash: HashMap::new(),
             mem_blobs: HashMap::new(),
             next_id: 1,
+            rev: 0,
         }
     }
 
@@ -99,11 +103,17 @@ impl History {
         Ok(h)
     }
 
+    /// Grows on every change; lets the UI cache query results.
+    pub fn revision(&self) -> u64 {
+        self.rev
+    }
+
     pub fn is_persistent(&self) -> bool {
         self.vault.is_some()
     }
 
     fn apply(&mut self, e: Event) {
+        self.rev += 1;
         match e {
             Event::Put { item } => {
                 self.next_id = self.next_id.max(item.id + 1);
@@ -112,12 +122,20 @@ impl History {
                 }
                 self.by_hash.insert(item.hash.clone(), item.id);
                 let lower = lower_of(&item);
-                self.slots.insert(item.id, Slot { item, lower });
+                self.slots.insert(
+                    item.id,
+                    Slot {
+                        item,
+                        lower,
+                        order: self.rev,
+                    },
+                );
             }
             Event::Touch { id, at } => {
                 if let Some(s) = self.slots.get_mut(&id) {
                     s.item.count += 1;
                     s.item.last_used = s.item.last_used.max(at);
+                    s.order = self.rev;
                 }
             }
             Event::Pin { id, pinned } => {
@@ -146,6 +164,7 @@ impl History {
             self.by_hash.remove(&s.item.hash);
         }
         self.mem_blobs.remove(&id);
+        self.rev += 1;
     }
 
     /// Picks up changes made by another process (the CLI).
@@ -266,10 +285,18 @@ impl History {
         item.volatile = true;
         let id = item.id;
         self.next_id += 1;
+        self.rev += 1;
         self.mem_blobs.insert(id, blob);
         self.by_hash.insert(item.hash.clone(), id);
         let lower = lower_of(&item);
-        self.slots.insert(id, Slot { item, lower });
+        self.slots.insert(
+            id,
+            Slot {
+                item,
+                lower,
+                order: self.rev,
+            },
+        );
         Ok(Added::New(id))
     }
 
@@ -303,7 +330,7 @@ impl History {
     /// Entries matching the query: pinned first, then the best match / the most recent.
     pub fn query(&self, q: &Query) -> Vec<&Item> {
         let needle = q.text.trim().to_lowercase();
-        let mut hits: Vec<(i32, &Item)> = Vec::new();
+        let mut hits: Vec<(i32, u64, &Item)> = Vec::new();
         for s in self.slots.values() {
             let it = &s.item;
             if (!q.kinds.is_empty() && !q.kinds.contains(&it.kind))
@@ -321,16 +348,16 @@ impl History {
                     None => continue,
                 }
             };
-            hits.push((score, it));
+            hits.push((score, s.order, it));
         }
         hits.sort_by(|a, b| {
-            b.1.pinned
-                .cmp(&a.1.pinned)
+            b.2.pinned
+                .cmp(&a.2.pinned)
                 .then(b.0.cmp(&a.0))
-                .then(b.1.last_used.cmp(&a.1.last_used))
-                .then(b.1.id.cmp(&a.1.id))
+                .then(b.2.last_used.cmp(&a.2.last_used))
+                .then(b.1.cmp(&a.1))
         });
-        hits.into_iter().map(|(_, it)| it).collect()
+        hits.into_iter().map(|(_, _, it)| it).collect()
     }
 
     /// Distinct source applications, most used first.
@@ -378,9 +405,11 @@ impl History {
 
     pub fn clear(&mut self, keep_pinned: bool) -> Result<()> {
         self.commit(Event::Clear { keep_pinned }, None)?;
-        self.slots
-            .retain(|_, s| s.item.volatile || (keep_pinned && s.item.pinned));
+        // the vault event leaves volatile entries alone (they are not in it); "clear all" must not
+        self.slots.retain(|_, s| keep_pinned && s.item.pinned);
         self.by_hash.retain(|_, id| self.slots.contains_key(id));
+        self.mem_blobs.retain(|id, _| self.slots.contains_key(id));
+        self.rev += 1;
         self.compact()
     }
 
