@@ -150,8 +150,48 @@ impl App {
             {
                 ui.label(RichText::new(e).color(crate::theme::BAD));
             }
-            ui.label(RichText::new(S::HotkeyNote.get(lang)).weak().small());
+            let win_v = st.replace_win_v;
+            if !win_v {
+                ui.label(RichText::new(S::HotkeyNote.get(lang)).weak().small());
+            }
+            let mut at_cursor = st.popup_at_cursor;
             drop(st);
+            if !self.shared.demo {
+                let mut choice = win_v;
+                ui.horizontal(|ui| {
+                    ui.label(S::QuickPasteMode.get(lang));
+                    ui.radio_value(&mut choice, false, S::WinVWindows.get(lang));
+                    ui.radio_value(&mut choice, true, S::WinVClipvault.get(lang));
+                });
+                if choice != win_v && winint::set_win_v_released(choice).is_ok() {
+                    let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                    st.replace_win_v = choice;
+                    st.save();
+                    drop(st);
+                    self.popup.win_v_hint = true;
+                    platform::post(platform::WM_REHOTKEY);
+                }
+                if choice {
+                    ui.label(RichText::new(S::WinVNote.get(lang)).weak().small());
+                }
+                if self.popup.win_v_hint {
+                    ui.label(RichText::new(S::WinVRestart.get(lang)).color(crate::theme::ACCENT));
+                    if ui.button(S::WinVRestartBtn.get(lang)).clicked() {
+                        winint::restart_explorer();
+                        self.popup.win_v_hint = false;
+                        // the new Explorer has to be up before the hotkey can be taken
+                        std::thread::spawn(|| {
+                            std::thread::sleep(std::time::Duration::from_secs(4));
+                            platform::post(platform::WM_REHOTKEY);
+                        });
+                    }
+                }
+            }
+            if ui.checkbox(&mut at_cursor, S::PopupAtCursor.get(lang)).changed() {
+                let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                st.popup_at_cursor = at_cursor;
+                st.save();
+            }
             if !self.shared.demo {
                 let mut auto = winint::autostart_enabled();
                 if ui.checkbox(&mut auto, S::Autostart.get(lang)).changed()

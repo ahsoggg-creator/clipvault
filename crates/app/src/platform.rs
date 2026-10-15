@@ -49,6 +49,7 @@ pub const WM_QUIT_APP: u32 = WM_APP + 6;
 
 const ID_HOTKEY_POPUP: i32 = 1;
 const ID_HOTKEY_PLAIN: i32 = 2;
+const ID_HOTKEY_WINV: i32 = 3;
 const ID_HOTKEY_TRANSFORM: i32 = 100;
 const ID_HOTKEY_SNIPPET: i32 = 300;
 const TIMER_ERASE: usize = 1;
@@ -153,7 +154,7 @@ static HOTKEYS: Mutex<Vec<(i32, paste::HotkeyAction)>> = Mutex::new(Vec::new());
 
 fn register_hotkeys(hwnd: HWND) {
     let s = sh();
-    let (popup_spec, plain_spec, transforms) = {
+    let (popup_spec, plain_spec, transforms, win_v) = {
         let st = s.settings.lock().unwrap_or_else(|e| e.into_inner());
         (
             if s.admin {
@@ -163,6 +164,7 @@ fn register_hotkeys(hwnd: HWND) {
             },
             st.plain_paste_hotkey.clone(),
             st.transform_hotkeys.clone(),
+            st.replace_win_v && !s.admin,
         )
     };
     *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -170,6 +172,7 @@ fn register_hotkeys(hwnd: HWND) {
     // SAFETY: unregistering an id that is not registered just fails.
     unsafe {
         UnregisterHotKey(hwnd, ID_HOTKEY_POPUP);
+        UnregisterHotKey(hwnd, ID_HOTKEY_WINV);
         for (id, _) in actions.iter() {
             UnregisterHotKey(hwnd, *id);
         }
@@ -190,6 +193,9 @@ fn register_hotkeys(hwnd: HWND) {
     };
     if !try_register(ID_HOTKEY_POPUP, &popup_spec) {
         *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.tr(S::HotkeyBusy).to_owned());
+    }
+    if win_v {
+        try_register(ID_HOTKEY_WINV, "Win+V");
     }
     if !s.admin {
         if !plain_spec.trim().is_empty() && try_register(ID_HOTKEY_PLAIN, &plain_spec) {
@@ -298,6 +304,11 @@ fn popup_hwnd() -> HWND {
     h
 }
 
+/// Closes the whole application (the tray menu's "Exit").
+pub fn quit_app() {
+    post(WM_QUIT_APP);
+}
+
 pub fn hide_popup() {
     let h = popup_hwnd();
     if !h.is_null() {
@@ -332,9 +343,17 @@ fn show_popup() {
         let mut rc = std::mem::zeroed();
         GetWindowRect(h, &mut rc);
         let (w, hh) = (rc.right - rc.left, rc.bottom - rc.top);
+        let at_cursor = s.settings.lock().unwrap_or_else(|e| e.into_inner()).popup_at_cursor;
         let (x, y) = if GetMonitorInfoW(mon, &mut mi) != 0 {
             let r = mi.rcWork;
-            (r.left + (r.right - r.left - w) / 2, r.top + (r.bottom - r.top - hh) / 3)
+            if at_cursor {
+                (
+                    (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
+                    (cur.y - 24).clamp(r.top, (r.bottom - hh).max(r.top)),
+                )
+            } else {
+                (r.left + (r.right - r.left - w) / 2, r.top + (r.bottom - r.top - hh) / 3)
+            }
         } else {
             (rc.left, rc.top)
         };
@@ -461,7 +480,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_HOTKEY => {
             let id = wp as i32;
-            if id == ID_HOTKEY_POPUP {
+            if id == ID_HOTKEY_POPUP || id == ID_HOTKEY_WINV {
                 toggle_popup();
             } else {
                 let action = HOTKEYS

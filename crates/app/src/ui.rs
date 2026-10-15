@@ -63,6 +63,8 @@ pub struct Popup {
     pub confirm_clear: bool,
     tex: Option<(u64, TextureHandle)>,
     pub capture_hotkey: bool,
+    /// The Win+V setting changed and Explorer has not been restarted yet.
+    pub win_v_hint: bool,
     scroll_to_selected: bool,
     pub focus_search: bool,
     pub toast: Option<(String, Instant)>,
@@ -98,6 +100,7 @@ impl Default for Popup {
             confirm_clear: false,
             tex: None,
             capture_hotkey: false,
+            win_v_hint: false,
             scroll_to_selected: false,
             focus_search: true,
             toast: None,
@@ -452,8 +455,17 @@ impl App {
             self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).paused,
             self.shared.incognito.load(Ordering::Relaxed),
         );
-        // the title row doubles as the drag handle of the borderless window
-        let title = ui.horizontal(|ui| {
+        // the title row doubles as the drag handle of the borderless window; it is registered before the
+        // buttons so that they sit on top of it and still receive their clicks
+        let row = ui.available_rect_before_wrap();
+        let drag_area = egui::Rect::from_min_size(row.min, vec2(row.width(), 28.0));
+        if ui
+            .interact(drag_area, ui.id().with("drag"), Sense::drag())
+            .drag_started()
+        {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        ui.horizontal(|ui| {
             if let Some(icon) = &self.icon {
                 ui.add(egui::Image::new(icon).fit_to_exact_size(vec2(22.0, 22.0)));
             }
@@ -485,7 +497,10 @@ impl App {
                 self.start_update_check(true);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("×").clicked() && !self.shared.demo {
+                if ui.button("×").on_hover_text(S::BtnQuit.get(lang)).clicked() && !self.shared.demo {
+                    platform::quit_app();
+                }
+                if ui.button("—").on_hover_text(S::BtnMinimize.get(lang)).clicked() && !self.shared.demo {
                     platform::hide_popup();
                 }
                 let label = if self.popup.view == View::Settings {
@@ -514,10 +529,6 @@ impl App {
                 }
             });
         });
-        let drag = ui.interact(title.response.rect, ui.id().with("drag"), Sense::click_and_drag());
-        if drag.drag_started() {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
         if self.popup.view == View::History {
             self.filters(ui, lang);
         }

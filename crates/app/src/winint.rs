@@ -152,6 +152,63 @@ pub fn autostart_enabled() -> bool {
     }
 }
 
+const ADVANCED_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+const DISABLED_HOTKEYS: &str = "DisabledHotkeys";
+
+/// Adds or removes `letter` in the Explorer `DisabledHotkeys` string (the Win+<letter> shortcuts it gives up).
+fn with_letter(current: &str, letter: char, on: bool) -> String {
+    let rest: String = current.chars().filter(|c| !c.eq_ignore_ascii_case(&letter)).collect();
+    if on { format!("{rest}{letter}") } else { rest }
+}
+
+fn disabled_hotkeys() -> String {
+    let Some(k) = open_key(ADVANCED_KEY, KEY_READ) else {
+        return String::new();
+    };
+    let n = wide(DISABLED_HOTKEYS);
+    let mut buf = [0u16; 128];
+    let mut size = std::mem::size_of_val(&buf) as u32;
+    // SAFETY: the buffer and its byte size describe the same live array.
+    let rc = unsafe {
+        RegQueryValueExW(
+            k.0,
+            n.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if rc != ERROR_SUCCESS {
+        return String::new();
+    }
+    let len = (size as usize / 2).min(buf.len());
+    String::from_utf16_lossy(&buf[..len]).trim_end_matches('\0').to_owned()
+}
+
+/// Hands Win+V to Clipvault (`true`) or back to Windows (`false`).
+pub fn set_win_v_released(on: bool) -> Result<(), String> {
+    let next = with_letter(&disabled_hotkeys(), 'V', on);
+    if next.is_empty() {
+        if let Some(k) = open_key(ADVANCED_KEY, KEY_WRITE) {
+            let n = wide(DISABLED_HOTKEYS);
+            // SAFETY: deleting a missing value just returns an error code.
+            unsafe { RegDeleteValueW(k.0, n.as_ptr()) };
+        }
+        Ok(())
+    } else {
+        set_str(&create_key(ADVANCED_KEY)?, DISABLED_HOTKEYS, &next)
+    }
+}
+
+/// Restarts the shell so it re-reads `DisabledHotkeys`.
+pub fn restart_explorer() {
+    let _ = std::process::Command::new("cmd.exe")
+        .raw_arg("/C taskkill /f /im explorer.exe & start explorer.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
+
 pub fn set_autostart(enable: bool, exe: &Path) -> Result<(), String> {
     if enable {
         let k = create_key(RUN_KEY)?;
@@ -324,6 +381,7 @@ pub fn uninstall(delete_data: bool) -> Result<(), String> {
     remove_shortcuts();
     delete_tree(UNINSTALL_KEY);
     set_autostart(false, Path::new(""))?;
+    let _ = set_win_v_released(false);
     if delete_data && let Some(d) = clipvault_core::config::data_dir() {
         let _ = std::fs::remove_dir_all(d);
     }
@@ -338,4 +396,17 @@ pub fn uninstall(delete_data: bool) -> Result<(), String> {
             .spawn();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod win_v_tests {
+    use super::with_letter;
+
+    #[test]
+    fn letter_is_added_once_and_removed_cleanly() {
+        assert_eq!(with_letter("", 'V', true), "V");
+        assert_eq!(with_letter("V", 'V', true), "V");
+        assert_eq!(with_letter("EV", 'V', false), "E");
+        assert_eq!(with_letter("v", 'V', false), "");
+    }
 }

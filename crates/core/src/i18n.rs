@@ -185,6 +185,25 @@ strings! {
         "Win+V зарезервировано Windows, поэтому окно вызывается другим сочетанием.",
         "Win+V is reserved by Windows, so the popup uses a different hotkey."
     ),
+    QuickPasteMode => ("Быстрая вставка по Win+V", "Quick paste on Win+V"),
+    WinVWindows => ("Windows (стандартная)", "Windows (built-in)"),
+    WinVClipvault => ("Clipvault", "Clipvault"),
+    WinVRestart => (
+        "Чтобы переключение вступило в силу, перезапустите проводник (панель задач моргнёт на секунду).",
+        "Restart Explorer for the switch to take effect (the taskbar flickers for a second)."
+    ),
+    WinVRestartBtn => ("Перезапустить проводник", "Restart Explorer"),
+    WinVBusy => (
+        "Win+V пока занято Windows — перезапустите проводник.",
+        "Win+V is still held by Windows — restart Explorer."
+    ),
+    WinVNote => (
+        "Пока Clipvault не запущен, Win+V не работает вообще — держите автозапуск включённым.",
+        "While Clipvault is not running Win+V does nothing — keep autostart on."
+    ),
+    PopupAtCursor => ("Открывать окно у курсора мыши", "Open the popup at the mouse cursor"),
+    BtnMinimize => ("Свернуть в трей", "Minimise to tray"),
+    BtnQuit => ("Закрыть приложение", "Quit Clipvault"),
     Autostart => ("Запускать при входе в Windows", "Start with Windows"),
     SecLimits => ("Лимиты хранения", "Storage limits"),
     MaxItemKb => ("Максимальный размер записи, КБ", "Largest entry, KB"),

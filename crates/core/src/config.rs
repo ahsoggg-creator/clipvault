@@ -66,6 +66,10 @@ pub struct Settings {
     pub plain_paste_hotkey: String,
     /// Hotkeys that transform the clipboard text and paste the result.
     pub transform_hotkeys: Vec<TransformHotkey>,
+    /// Clipvault answers Win+V instead of the built-in Windows clipboard history.
+    pub replace_win_v: bool,
+    /// The popup opens next to the mouse cursor instead of the middle of the screen.
+    pub popup_at_cursor: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +109,8 @@ impl Default for Settings {
                     transform: "layout-auto".into(),
                 },
             ],
+            replace_win_v: false,
+            popup_at_cursor: false,
         }
     }
 }
