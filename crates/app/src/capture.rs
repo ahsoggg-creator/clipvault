@@ -1,7 +1,10 @@
 //! What happens when the clipboard changes: look, decide, record.
 
+use std::time::{Duration, Instant};
+
 use clipvault_core::clipfmt;
-use clipvault_core::{AddError, Added, BlobKind, Kind, NewItem, now_unix};
+use clipvault_core::guard::{self, SecretPolicy, SkipReason};
+use clipvault_core::{AddError, Added, BlobKind, Kind, NewItem, dedup, now_unix};
 use windows_sys::Win32::Foundation::HWND;
 
 use crate::diag;
@@ -82,22 +85,84 @@ pub fn on_clipboard_update(shared: &Shared, hwnd: HWND) {
     if meta.internal {
         return;
     }
+    let st = shared.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // the program's own "do not record" flags and the blacklist are checked before the content is even read
+    if let Some(reason) = guard::skip_reason(&meta.flags, &meta.app, &st.blacklist, st.respect_app_flags) {
+        let mut stats = shared.stats.lock().unwrap_or_else(|e| e.into_inner());
+        match reason {
+            SkipReason::AppFlag => stats.skipped_flag += 1,
+            SkipReason::BlacklistedApp => stats.skipped_blacklist += 1,
+        }
+        return;
+    }
     let Some(content) = winclip::read_content(hwnd) else {
         shared.stats.lock().unwrap_or_else(|e| e.into_inner()).unreadable += 1;
         diag::warn("clipboard stayed busy: an update was skipped");
         return;
     };
-    let Some(item) = build_item(content, &meta) else { return };
-    record(shared, item);
+    let Some(mut item) = build_item(content, &meta) else {
+        return;
+    };
+
+    if st.secrets_enabled
+        && !matches!(item.kind, Some(Kind::Image | Kind::Files))
+        && let Some(kind) = shared.detector(&st).detect(&item.text)
+    {
+        shared.stats.lock().unwrap_or_else(|e| e.into_inner()).secrets += 1;
+        diag::info(format!("secret recognised: {kind:?}, policy {:?}", st.secret_policy));
+        match st.secret_policy {
+            SecretPolicy::DontStore => return,
+            SecretPolicy::Mask => {
+                item = NewItem {
+                    kind: Some(Kind::Text),
+                    text: guard::mask_text(kind, st.lang),
+                    masked: true,
+                    secret: Some(kind),
+                    source_app: item.source_app,
+                    source_title: String::new(),
+                    ..Default::default()
+                };
+            }
+            SecretPolicy::MemoryOnly => {
+                let wipe = dedup::content_hash(Kind::Text, &item.text, &[]);
+                item.secret = Some(kind);
+                item.source_title = String::new();
+                record(shared, item, true);
+                let due = Instant::now() + Duration::from_secs(u64::from(st.secret_clear_secs));
+                shared.erase.lock().unwrap_or_else(|e| e.into_inner()).push((due, wipe));
+                return;
+            }
+        }
+    }
+    record(shared, item, false);
 }
 
-fn record(shared: &Shared, item: NewItem) {
+/// Wipes the clipboard where a memory-only secret is still sitting after its time ran out.
+pub fn process_erasures(shared: &Shared, hwnd: HWND) {
+    let now = Instant::now();
+    let due: Vec<String> = {
+        let mut list = shared.erase.lock().unwrap_or_else(|e| e.into_inner());
+        let (due, keep): (Vec<_>, Vec<_>) = list.drain(..).partition(|(t, _)| *t <= now);
+        *list = keep;
+        due.into_iter().map(|(_, h)| h).collect()
+    };
+    for hash in due {
+        if winclip::clear_if_text(hwnd, &hash) {
+            diag::info("a memory-only secret was wiped from the clipboard");
+        }
+    }
+}
+
+fn record(shared: &Shared, item: NewItem, volatile: bool) {
     let limits = shared.settings.lock().unwrap_or_else(|e| e.into_inner()).limits();
-    let result = shared
-        .history
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .add(item, now_unix(), &limits);
+    let result = {
+        let mut h = shared.history.lock().unwrap_or_else(|e| e.into_inner());
+        if volatile {
+            h.add_volatile(item, now_unix(), &limits)
+        } else {
+            h.add(item, now_unix(), &limits)
+        }
+    };
     let mut st = shared.stats.lock().unwrap_or_else(|e| e.into_inner());
     match result {
         Ok(Added::New(_)) => st.captured += 1,

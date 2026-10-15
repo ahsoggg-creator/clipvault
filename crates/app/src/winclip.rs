@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use clipvault_core::clipfmt;
+use clipvault_core::guard::{ClipFlags, dword_value};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows_sys::Win32::System::DataExchange::{
@@ -34,6 +35,10 @@ struct Formats {
     rtf: u32,
     png: u32,
     marker: u32,
+    exclude_monitor: u32,
+    can_include_history: u32,
+    can_upload_cloud: u32,
+    viewer_ignore: u32,
 }
 
 fn formats() -> &'static Formats {
@@ -49,6 +54,10 @@ fn formats() -> &'static Formats {
             rtf: reg("Rich Text Format"),
             png: reg("PNG"),
             marker: reg("ClipvaultInternal"),
+            exclude_monitor: reg("ExcludeClipboardContentFromMonitorProcessing"),
+            can_include_history: reg("CanIncludeInClipboardHistory"),
+            can_upload_cloud: reg("CanUploadToCloudClipboard"),
+            viewer_ignore: reg("Clipboard Viewer Ignore"),
         }
     })
 }
@@ -119,6 +128,8 @@ pub struct Meta {
     pub title: String,
     /// Put there by Clipvault itself when pasting.
     pub internal: bool,
+    /// The "do not record me" formats the copying program set.
+    pub flags: ClipFlags,
 }
 
 /// The raw content of the clipboard in the formats Clipvault stores.
@@ -180,10 +191,20 @@ pub fn inspect(owner: HWND) -> Option<Meta> {
         .or_else(|| window_pid(fg))
         .and_then(process_exe)
         .unwrap_or_default();
+    let f = formats();
+    // a DWORD format that is present and 0 means "no"
+    let denied = |fmt: u32| available(fmt) && global_bytes(fmt).and_then(|b| dword_value(&b)) == Some(0);
+    let flags = ClipFlags {
+        exclude_monitor: available(f.exclude_monitor),
+        history_denied: denied(f.can_include_history),
+        cloud_denied: denied(f.can_upload_cloud),
+        viewer_ignore: available(f.viewer_ignore),
+    };
     Some(Meta {
         app,
         title: window_title(fg),
-        internal: available(formats().marker),
+        internal: available(f.marker),
+        flags,
     })
 }
 
@@ -215,6 +236,25 @@ pub fn read_content(owner: HWND) -> Option<Content> {
         c.files = hdrop_files();
     }
     Some(c)
+}
+
+/// Empties the clipboard if it still holds exactly this plain text (compared by its BLAKE3 hash).
+pub fn clear_if_text(owner: HWND, hash: &str) -> bool {
+    let Some(_clip) = Clipboard::open(owner) else {
+        return false;
+    };
+    if !available(CF_UNICODETEXT.into()) {
+        return false;
+    }
+    let Some(text) = global_bytes(CF_UNICODETEXT.into()).map(|b| wide_text(&b)) else {
+        return false;
+    };
+    if clipvault_core::dedup::content_hash(clipvault_core::Kind::Text, &text, &[]) != hash {
+        return false;
+    }
+    // SAFETY: the clipboard is open.
+    unsafe { EmptyClipboard() };
+    true
 }
 
 fn hdrop_files() -> Vec<String> {

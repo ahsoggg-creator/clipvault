@@ -24,9 +24,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindowRect,
     GetWindowThreadProcessId, HWND_TOPMOST, IMAGE_ICON, IsWindowVisible, LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED,
     MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON,
-    SW_HIDE, SW_SHOW, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu,
-    TranslateMessage, WM_APP, WM_CLIPBOARDUPDATE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_NULL,
-    WM_RBUTTONUP, WNDCLASSW,
+    SW_HIDE, SW_SHOW, SWP_NOSIZE, SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_RIGHTBUTTON,
+    TrackPopupMenu, TranslateMessage, WM_APP, WM_CLIPBOARDUPDATE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP,
+    WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 
 use crate::shared::Shared;
@@ -47,6 +47,7 @@ pub const WM_BALLOON: u32 = WM_APP + 5;
 pub const WM_QUIT_APP: u32 = WM_APP + 6;
 
 const ID_HOTKEY_POPUP: i32 = 1;
+const TIMER_ERASE: usize = 1;
 const CMD_OPEN: usize = 1001;
 const CMD_PAUSE: usize = 1002;
 const CMD_INCOGNITO: usize = 1003;
@@ -125,6 +126,7 @@ fn run(listen: bool) {
         }
         register_hotkeys(hwnd);
         tray(hwnd, NIM_ADD, None);
+        SetTimer(hwnd, TIMER_ERASE, 1000, None);
         diag::info("clipboard listener started");
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
@@ -412,6 +414,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_COMMAND => {
             command(hwnd, wp & 0xFFFF);
+            0
+        }
+        WM_TIMER => {
+            if wp == TIMER_ERASE {
+                capture::process_erasures(sh(), hwnd);
+            }
             0
         }
         WM_PASTE => {

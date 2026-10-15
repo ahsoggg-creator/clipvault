@@ -3,8 +3,12 @@
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64};
 use std::sync::{Mutex, OnceLock};
 
+use std::sync::Arc;
+use std::time::Instant;
+
 use clipvault_core::config::{Lang, Settings};
 use clipvault_core::i18n::S;
+use clipvault_core::secrets::{Detector, Sensitivity};
 use clipvault_core::{History, Kind};
 use eframe::egui;
 
@@ -16,6 +20,9 @@ pub struct Stats {
     pub skipped_paused: u64,
     pub rejected: u64,
     pub unreadable: u64,
+    pub skipped_flag: u64,
+    pub skipped_blacklist: u64,
+    pub secrets: u64,
 }
 
 pub struct PasteRequest {
@@ -44,7 +51,12 @@ pub struct Shared {
     /// The Windows thread's hidden window, so the GUI can post messages to it.
     pub msg_hwnd: AtomicIsize,
     pub quit: AtomicBool,
+    /// Secrets kept by the "memory only" policy: wipe the clipboard at `Instant` if it still holds this text (hash).
+    pub erase: Mutex<Vec<(Instant, String)>>,
+    detector: Mutex<Option<(DetectorKey, Arc<Detector>)>>,
 }
+
+type DetectorKey = (Sensitivity, Vec<String>);
 
 impl Shared {
     pub fn new(history: History, settings: Settings, demo: bool, admin: bool) -> Shared {
@@ -65,7 +77,23 @@ impl Shared {
             ctx: OnceLock::new(),
             msg_hwnd: AtomicIsize::new(0),
             quit: AtomicBool::new(false),
+            erase: Mutex::new(Vec::new()),
+            detector: Mutex::new(None),
         }
+    }
+
+    /// The secret detector for the current settings (rebuilt only when they change).
+    pub fn detector(&self, st: &Settings) -> Arc<Detector> {
+        let key: DetectorKey = (st.password_sensitivity, st.custom_patterns.clone());
+        let mut slot = self.detector.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, d)) = slot.as_ref()
+            && *k == key
+        {
+            return d.clone();
+        }
+        let d = Arc::new(Detector::new(key.0, &key.1).0);
+        *slot = Some((key, d.clone()));
+        d
     }
 
     pub fn lang(&self) -> Lang {
