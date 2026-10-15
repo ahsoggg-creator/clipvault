@@ -27,6 +27,8 @@ pub struct Stats {
 
 pub struct PasteRequest {
     pub id: u64,
+    /// Paste this text instead of the entry (a transformed entry, an expanded snippet).
+    pub text: Option<String>,
 }
 
 pub struct Shared {

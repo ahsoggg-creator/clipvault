@@ -2,11 +2,12 @@
 //! Hotkeys use `RegisterHotKey` — there is no keyboard hook anywhere in Clipvault.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use clipvault_core::config::Settings;
 use clipvault_core::hotkey::parse_hotkey;
 use clipvault_core::i18n::S;
+use clipvault_core::transform::Transform;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::System::DataExchange::{
@@ -47,6 +48,9 @@ pub const WM_BALLOON: u32 = WM_APP + 5;
 pub const WM_QUIT_APP: u32 = WM_APP + 6;
 
 const ID_HOTKEY_POPUP: i32 = 1;
+const ID_HOTKEY_PLAIN: i32 = 2;
+const ID_HOTKEY_TRANSFORM: i32 = 100;
+const ID_HOTKEY_SNIPPET: i32 = 300;
 const TIMER_ERASE: usize = 1;
 const CMD_OPEN: usize = 1001;
 const CMD_PAUSE: usize = 1002;
@@ -137,33 +141,90 @@ fn run(listen: bool) {
             RemoveClipboardFormatListener(hwnd);
         }
         UnregisterHotKey(hwnd, ID_HOTKEY_POPUP);
+        for (id, _) in HOTKEYS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            UnregisterHotKey(hwnd, *id);
+        }
         tray(hwnd, NIM_DELETE, None);
     }
 }
 
+/// The hotkeys that are registered right now, and what each one does.
+static HOTKEYS: Mutex<Vec<(i32, paste::HotkeyAction)>> = Mutex::new(Vec::new());
+
 fn register_hotkeys(hwnd: HWND) {
     let s = sh();
-    let spec = {
+    let (popup_spec, plain_spec, transforms) = {
         let st = s.settings.lock().unwrap_or_else(|e| e.into_inner());
-        if s.admin {
-            st.admin_hotkey.clone()
-        } else {
-            st.hotkey.clone()
-        }
+        (
+            if s.admin {
+                st.admin_hotkey.clone()
+            } else {
+                st.hotkey.clone()
+            },
+            st.plain_paste_hotkey.clone(),
+            st.transform_hotkeys.clone(),
+        )
     };
     *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let mut actions = HOTKEYS.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: unregistering an id that is not registered just fails.
-    unsafe { UnregisterHotKey(hwnd, ID_HOTKEY_POPUP) };
-    match parse_hotkey(&spec) {
-        None => *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.tr(S::HotkeyInvalid).to_owned()),
-        Some((mods, vk)) => {
-            // SAFETY: `hwnd` belongs to this thread.
-            if unsafe { RegisterHotKey(hwnd, ID_HOTKEY_POPUP, mods | MOD_NOREPEAT, vk) } == 0 {
-                diag::warn("popup hotkey is taken by another program");
-                *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.tr(S::HotkeyBusy).to_owned());
-                balloon(hwnd, s.tr(S::HotkeyBusy));
+    unsafe {
+        UnregisterHotKey(hwnd, ID_HOTKEY_POPUP);
+        for (id, _) in actions.iter() {
+            UnregisterHotKey(hwnd, *id);
+        }
+    }
+    actions.clear();
+    let mut busy: Vec<String> = Vec::new();
+    let mut try_register = |id: i32, spec: &str| -> bool {
+        let Some((mods, vk)) = parse_hotkey(spec) else {
+            busy.push(spec.to_owned());
+            return false;
+        };
+        // SAFETY: `hwnd` belongs to this thread.
+        let ok = unsafe { RegisterHotKey(hwnd, id, mods | MOD_NOREPEAT, vk) } != 0;
+        if !ok {
+            busy.push(spec.to_owned());
+        }
+        ok
+    };
+    if !try_register(ID_HOTKEY_POPUP, &popup_spec) {
+        *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.tr(S::HotkeyBusy).to_owned());
+    }
+    if !s.admin {
+        if !plain_spec.trim().is_empty() && try_register(ID_HOTKEY_PLAIN, &plain_spec) {
+            actions.push((ID_HOTKEY_PLAIN, paste::HotkeyAction::PlainPaste));
+        }
+        for (i, th) in transforms.iter().enumerate() {
+            let Some(t) = Transform::parse(&th.transform) else {
+                continue;
+            };
+            let id = ID_HOTKEY_TRANSFORM + i as i32;
+            if !th.hotkey.trim().is_empty() && try_register(id, &th.hotkey) {
+                actions.push((id, paste::HotkeyAction::Transform(t)));
             }
         }
+        let snippets: Vec<(u64, String)> = s
+            .history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .snippets()
+            .iter()
+            .filter(|sn| !sn.hotkey.trim().is_empty())
+            .map(|sn| (sn.id, sn.hotkey.clone()))
+            .collect();
+        for (i, (sid, spec)) in snippets.iter().enumerate() {
+            let id = ID_HOTKEY_SNIPPET + i as i32;
+            if try_register(id, spec) {
+                actions.push((id, paste::HotkeyAction::Snippet(*sid)));
+            }
+        }
+    }
+    if !busy.is_empty() {
+        diag::warn(format!("{} hotkey(s) could not be registered", busy.len()));
+        let text = format!("{}: {}", s.tr(S::HotkeyBusy), busy.join(", "));
+        *s.hotkey_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
+        balloon(hwnd, &text);
     }
     s.repaint();
 }
@@ -399,8 +460,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_HOTKEY => {
-            if wp as i32 == ID_HOTKEY_POPUP {
+            let id = wp as i32;
+            if id == ID_HOTKEY_POPUP {
                 toggle_popup();
+            } else {
+                let action = HOTKEYS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .find(|(i, _)| *i == id)
+                    .map(|(_, a)| a.clone());
+                if let Some(action) = action {
+                    // the action sleeps while the target program reads the clipboard: not on the message thread
+                    let h = hwnd as isize;
+                    std::thread::spawn(move || paste::hotkey_action(sh(), h as HWND, &action));
+                }
             }
             0
         }
