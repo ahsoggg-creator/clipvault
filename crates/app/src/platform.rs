@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use clipvault_core::config::CompactPosition;
 use clipvault_core::config::Settings;
 use clipvault_core::hotkey::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, format_hotkey, parse_hotkey, recordable_keys};
 use clipvault_core::i18n::S;
@@ -316,11 +317,6 @@ fn popup_hwnd() -> HWND {
     h
 }
 
-/// Closes the whole application (the tray menu's "Exit").
-pub fn quit_app() {
-    post(WM_QUIT_APP);
-}
-
 pub fn hide_popup() {
     capture_end();
     let h = popup_hwnd();
@@ -368,10 +364,16 @@ fn show_popup(compact: bool) {
         }
         let mut cur = POINT { x: 0, y: 0 };
         GetCursorPos(&mut cur);
-        let mon = MonitorFromPoint(cur, MONITOR_DEFAULTTONEAREST);
+        let (at_cursor, position, last) = {
+            let st = s.settings.lock().unwrap_or_else(|e| e.into_inner());
+            (st.popup_at_cursor, st.compact_position, st.compact_last)
+        };
+        // "where it was left" lives on the monitor it was left on; everything else follows the mouse
+        let last = last.filter(|_| compact && position == CompactPosition::Last);
+        let anchor = last.map_or(cur, |(x, y)| POINT { x, y });
+        let mon = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        let at_cursor = s.settings.lock().unwrap_or_else(|e| e.into_inner()).popup_at_cursor;
         if GetMonitorInfoW(mon, &mut mi) != 0 {
             let r = mi.rcWork;
             // first hop onto the monitor: the size is worked out with the scale factor of the screen it lands on
@@ -386,11 +388,21 @@ fn show_popup(compact: bool) {
             );
             let (w, hh) = popup_size_px(h, compact, &r);
             let (x, y) = if compact {
-                // like Win+V: right under the mouse, pushed back inside the screen when it does not fit
-                (
-                    (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
-                    (cur.y + 16).clamp(r.top, (r.bottom - hh).max(r.top)),
-                )
+                match (position, last) {
+                    (CompactPosition::Center, _) => {
+                        (r.left + (r.right - r.left - w) / 2, r.top + (r.bottom - r.top - hh) / 2)
+                    }
+                    (CompactPosition::Corner, _) => ((r.right - w - 12).max(r.left), (r.bottom - hh - 12).max(r.top)),
+                    (CompactPosition::Last, Some((lx, ly))) => (
+                        lx.clamp(r.left, (r.right - w).max(r.left)),
+                        ly.clamp(r.top, (r.bottom - hh).max(r.top)),
+                    ),
+                    // like Win+V: right under the mouse, pushed back inside the screen when it does not fit
+                    _ => (
+                        (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
+                        (cur.y + 16).clamp(r.top, (r.bottom - hh).max(r.top)),
+                    ),
+                }
             } else if at_cursor {
                 (
                     (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
@@ -474,6 +486,19 @@ fn toggle_popup() {
 pub struct Drag {
     cursor: (i32, i32),
     window: (i32, i32),
+}
+
+/// The popup's top-left corner on the screen.
+pub fn window_pos() -> Option<(i32, i32)> {
+    let h = popup_hwnd();
+    if h.is_null() {
+        return None;
+    }
+    // SAFETY: out-pointer to a live local.
+    unsafe {
+        let mut rc: RECT = std::mem::zeroed();
+        (GetWindowRect(h, &mut rc) != 0).then_some((rc.left, rc.top))
+    }
 }
 
 /// Starts moving the popup by hand. The system's own move loop (`StartDrag`) only works while the window is

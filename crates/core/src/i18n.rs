@@ -236,7 +236,15 @@ strings! {
         "Open the full window at the mouse cursor (the compact one always opens there)"
     ),
     BtnMinimize => ("Свернуть в трей", "Minimise to tray"),
-    BtnQuit => ("Закрыть приложение", "Quit Clipvault"),
+    BtnCloseWindow => (
+        "Закрыть окно (программа остаётся в трее; выйти можно через значок в трее)",
+        "Close the window (the app stays in the tray; quit from the tray icon)"
+    ),
+    CompactPosLabel => ("Где открывать компактное окно", "Where the compact window opens"),
+    PosCursor => ("Под курсором мыши", "Under the mouse cursor"),
+    PosCenter => ("По центру экрана", "Center of the screen"),
+    PosCorner => ("В правом нижнем углу", "Bottom-right corner"),
+    PosLast => ("Там, где его оставили (перетащите окно)", "Where you left it (drag the window)"),
     Autostart => ("Запускать при входе в Windows", "Start with Windows"),
     SecLimits => ("Лимиты хранения", "Storage limits"),
     MaxItemKb => ("Максимальный размер записи, КБ", "Largest entry, KB"),

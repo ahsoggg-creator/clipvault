@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use clipvault_core::config::Lang;
+use clipvault_core::config::{CompactPosition, Lang};
 use clipvault_core::i18n::S;
 use eframe::egui::{self, RichText, Ui};
 
@@ -173,12 +173,40 @@ impl App {
             }
             let mut at_cursor = st.popup_at_cursor;
             let mut compact = st.compact_popup;
+            let mut cpos = st.compact_position;
             drop(st);
             if ui.checkbox(&mut compact, S::CompactPopup.get(lang)).changed() {
                 let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
                 st.compact_popup = compact;
                 st.save();
             }
+            ui.horizontal(|ui| {
+                ui.label(S::CompactPosLabel.get(lang));
+                let name = |p: CompactPosition| match p {
+                    CompactPosition::Cursor => S::PosCursor,
+                    CompactPosition::Center => S::PosCenter,
+                    CompactPosition::Corner => S::PosCorner,
+                    CompactPosition::Last => S::PosLast,
+                };
+                let before = cpos;
+                egui::ComboBox::from_id_salt("cpos")
+                    .selected_text(name(cpos).get(lang))
+                    .show_ui(ui, |ui| {
+                        for p in [
+                            CompactPosition::Cursor,
+                            CompactPosition::Center,
+                            CompactPosition::Corner,
+                            CompactPosition::Last,
+                        ] {
+                            ui.selectable_value(&mut cpos, p, name(p).get(lang));
+                        }
+                    });
+                if cpos != before {
+                    let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                    st.compact_position = cpos;
+                    st.save();
+                }
+            });
             if !self.shared.demo {
                 let mut choice = win_v;
                 ui.horizontal(|ui| {

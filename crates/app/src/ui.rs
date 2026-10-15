@@ -584,8 +584,15 @@ impl App {
             if self.popup.drag.is_none() {
                 self.popup.drag = platform::drag_begin();
             }
-        } else {
-            self.popup.drag = None;
+        } else if self.popup.drag.take().is_some() && self.shared.compact.load(Ordering::SeqCst) {
+            // the compact window was let go: remember where, for the "where I left it" setting
+            if let Some(pos) = platform::window_pos() {
+                let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                if st.compact_last != Some(pos) {
+                    st.compact_last = Some(pos);
+                    st.save();
+                }
+            }
         }
         if resp.dragged()
             && let Some(d) = self.popup.drag
@@ -635,8 +642,9 @@ impl App {
                 self.start_update_check(true);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("×").on_hover_text(S::BtnQuit.get(lang)).clicked() && !self.shared.demo {
-                    platform::quit_app();
+                // closing only hides the window: the app keeps running in the tray, whose menu has "Exit"
+                if ui.button("×").on_hover_text(S::BtnCloseWindow.get(lang)).clicked() && !self.shared.demo {
+                    platform::hide_popup();
                 }
                 if ui.button("—").on_hover_text(S::BtnMinimize.get(lang)).clicked() && !self.shared.demo {
                     platform::hide_popup();

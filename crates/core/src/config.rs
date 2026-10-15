@@ -28,6 +28,21 @@ pub enum Lang {
     En,
 }
 
+/// Where the compact quick-paste window opens.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompactPosition {
+    /// Under the mouse cursor, like the Windows clipboard history.
+    #[default]
+    Cursor,
+    /// The middle of the screen the mouse is on.
+    Center,
+    /// The bottom-right corner of that screen, by the tray.
+    Corner,
+    /// Where the user last dragged it.
+    Last,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -72,6 +87,10 @@ pub struct Settings {
     pub popup_at_cursor: bool,
     /// The hotkey opens a small quick-paste window (click an entry to paste it); the tray opens the full window.
     pub compact_popup: bool,
+    /// Where the compact window opens.
+    pub compact_position: CompactPosition,
+    /// Top-left corner (screen pixels) where the compact window was left after being dragged.
+    pub compact_last: Option<(i32, i32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +133,8 @@ impl Default for Settings {
             replace_win_v: false,
             popup_at_cursor: false,
             compact_popup: true,
+            compact_position: CompactPosition::Cursor,
+            compact_last: None,
         }
     }
 }
@@ -174,6 +195,12 @@ mod tests {
         assert!(
             s.compact_popup,
             "a settings file from an older version gets the compact window"
+        );
+        assert_eq!(s.compact_position, CompactPosition::Cursor);
+        let s: Settings = serde_json::from_str(r#"{"compact_position":"last","compact_last":[-1900,40]}"#).unwrap();
+        assert_eq!(
+            (s.compact_position, s.compact_last),
+            (CompactPosition::Last, Some((-1900, 40)))
         );
     }
 }
