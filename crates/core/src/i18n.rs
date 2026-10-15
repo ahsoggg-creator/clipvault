@@ -132,8 +132,8 @@ strings! {
     TrBase64Dec => ("Base64: декодировать", "Base64: decode"),
     TrUrlEnc => ("URL: кодировать", "URL: encode"),
     TrUrlDec => ("URL: декодировать", "URL: decode"),
-    TrLayoutEnRu => ("Раскладка: EN → RU", "Layout: EN → RU"),
-    TrLayoutRuEn => ("Раскладка: RU → EN", "Layout: RU → EN"),
+    TrLayoutEnRu => ("Раскладка: EN -> RU", "Layout: EN -> RU"),
+    TrLayoutRuEn => ("Раскладка: RU -> EN", "Layout: RU -> EN"),
     TrLayoutAuto => ("Раскладка: авто", "Layout: auto"),
     TrLinks => ("Извлечь ссылки", "Extract links"),
     TrEmails => ("Извлечь e-mail", "Extract e-mails"),
@@ -141,15 +141,15 @@ strings! {
     TrLower => ("нижний регистр", "lower case"),
     TrTitle => ("Каждое Слово С Заглавной", "Title Case"),
     TrTrim => ("Обрезать пробелы", "Trim whitespace"),
-    TrSort => ("Сортировать строки А→Я", "Sort lines A→Z"),
-    TrSortDesc => ("Сортировать строки Я→А", "Sort lines Z→A"),
+    TrSort => ("Сортировать строки А-Я", "Sort lines A-Z"),
+    TrSortDesc => ("Сортировать строки Я-А", "Sort lines Z-A"),
     TrUnique => ("Убрать повторы строк", "Remove duplicate lines"),
     PlainHotkey => ("Вставка без форматирования", "Paste without formatting"),
     PlainNote => (
         "Сочетание перехватывается глобально, а в некоторых приложениях Ctrl+Shift+V уже значит то же самое. Прежнее содержимое буфера возвращается после вставки.",
         "The hotkey is taken globally, and in some apps Ctrl+Shift+V already means the same. The previous clipboard content is put back after pasting."
     ),
-    TransformHotkeys => ("Сочетания для преобразований (текст из буфера → вставка результата)", "Transform hotkeys (clipboard text → paste the result)"),
+    TransformHotkeys => ("Сочетания для преобразований (текст из буфера -> вставка результата)", "Transform hotkeys (clipboard text -> paste the result)"),
     AddRow => ("Добавить", "Add"),
     Remove => ("Убрать", "Remove"),
     // snippets
@@ -213,7 +213,7 @@ strings! {
     InstallHere => ("Установить в профиль пользователя", "Install for this user"),
     Installed => ("Установлено", "Installed"),
     Version => ("Версия", "Version"),
-    DemoBanner => ("Демо: выдуманные записи, ничего не читается и не сохраняется", "Demo: made-up entries, nothing is read or saved"),
+    DemoBanner => ("Демо: выдуманные записи", "Demo: made-up entries"),
     // installer
     SetupTitle => ("Установка Clipvault", "Install Clipvault"),
     SetupFolder => ("Папка установки", "Install folder"),

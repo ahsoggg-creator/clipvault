@@ -535,7 +535,6 @@ impl History {
                 blob,
             });
         }
-        let mut entries = entries;
         let mut snips: Vec<&Snippet> = self.snippets.values().collect();
         snips.sort_by_key(|s| s.id);
         entries.extend(snips.into_iter().map(|s| Entry {
