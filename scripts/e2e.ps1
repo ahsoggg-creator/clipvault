@@ -312,4 +312,4 @@ finally {
     Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue
 }
 if ($script:fail -gt 0) { Write-Host "e2e: $script:fail check(s) FAILED"; exit 1 }
-Write-Host "e2e: all checks passed"
+Write-Host "e2e: all checks passed"; exit 0
