@@ -40,6 +40,20 @@ impl Kind {
     }
 }
 
+/// What kind of secret the filter recognised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretKind {
+    ApiKey,
+    Token,
+    PrivateKey,
+    ConnectionString,
+    SeedPhrase,
+    Card,
+    Password,
+    Custom,
+}
+
 /// What the attached binary payload is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -81,6 +95,9 @@ pub struct Item {
     /// The content was replaced by a mask because it looked like a secret.
     #[serde(default)]
     pub masked: bool,
+    /// What the secret filter recognised (set for masked entries and for entries kept in memory only).
+    #[serde(default)]
+    pub secret: Option<SecretKind>,
     /// Lives in memory only (a secret kept by the "memory only" policy): never written to disk.
     #[serde(skip)]
     pub volatile: bool,
@@ -97,6 +114,7 @@ pub struct NewItem {
     pub source_app: String,
     pub source_title: String,
     pub masked: bool,
+    pub secret: Option<SecretKind>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

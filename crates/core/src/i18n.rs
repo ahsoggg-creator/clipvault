@@ -89,6 +89,40 @@ strings! {
         "The normal copy cannot paste into windows running as administrator (a Windows protection). A separate window with administrator rights can; it only pastes and records nothing. One UAC prompt; the main copy stays unelevated."
     ),
     AdminHotkey => ("Сочетание окна администратора", "Administrator window hotkey"),
+    // secrets
+    SecApiKey => ("ключ API", "API key"),
+    SecToken => ("токен", "token"),
+    SecPrivateKey => ("закрытый ключ", "private key"),
+    SecConnection => ("строка подключения", "connection string"),
+    SecSeed => ("сид-фраза", "seed phrase"),
+    SecCard => ("номер карты", "card number"),
+    SecPassword => ("пароль", "password"),
+    SecCustom => ("свой шаблон", "custom pattern"),
+    SecretsSection => ("Защита секретов", "Secret protection"),
+    SecretsEnabled => ("Искать секреты до записи на диск", "Look for secrets before writing to disk"),
+    PolicyLabel => ("Что делать с секретом", "What to do with a secret"),
+    PolicyDont => ("Не сохранять", "Do not store"),
+    PolicyMemory => ("Держать в памяти и стереть из буфера", "Keep in memory, wipe from the clipboard"),
+    PolicyMask => ("Сохранить, но замаскировать", "Store, but masked"),
+    ClearAfter => ("Стереть из буфера через, секунд", "Wipe from the clipboard after, seconds"),
+    SensitivityLabel => ("Чувствительность к «похожим на пароль» строкам", "Sensitivity to password-looking strings"),
+    SensOff => ("Выкл.", "Off"),
+    SensLow => ("Низкая", "Low"),
+    SensMedium => ("Средняя", "Medium"),
+    SensHigh => ("Высокая (больше ложных срабатываний)", "High (more false alarms)"),
+    CustomPatterns => ("Свои регулярные выражения (по одному в строке)", "Your own regular expressions (one per line)"),
+    BadPatterns => ("Не скомпилировались строки:", "These lines did not compile:"),
+    RespectFlags => (
+        "Уважать флаги приложений (менеджеры паролей просят не записывать)",
+        "Obey the apps' own flags (password managers ask not to be recorded)"
+    ),
+    BlacklistLabel => ("Программы, из которых не записывать (по одной в строке, имя exe)", "Programs never recorded (one per line, exe name)"),
+    SecretsNote => (
+        "Секрет, оставленный в памяти, виден в списке скрытым и пропадает при выходе из программы.",
+        "A secret kept in memory shows hidden in the list and is gone when the program exits."
+    ),
+    Reveal => ("Показать", "Show"),
+    HideSecret => ("Скрыть", "Hide"),
     // tray
     TrayOpen => ("Открыть Clipvault", "Open Clipvault"),
     TraySettings => ("Настройки", "Settings"),

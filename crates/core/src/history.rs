@@ -249,6 +249,7 @@ impl History {
             count: 1,
             pinned: false,
             masked: new.masked,
+            secret: new.secret,
             volatile: false,
         };
         Ok((item, new.blob))

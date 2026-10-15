@@ -9,17 +9,19 @@ pub mod config;
 pub mod crypto;
 pub mod dedup;
 pub mod error;
+pub mod guard;
 pub mod history;
 pub mod hotkey;
 pub mod i18n;
 pub mod model;
 pub mod search;
+pub mod secrets;
 pub mod timefmt;
 pub mod vault;
 
 pub use error::{Error, Result};
 pub use history::{AddError, History, Limits, Query};
-pub use model::{Added, BlobKind, Item, Kind, NewItem, Reject};
+pub use model::{Added, BlobKind, Item, Kind, NewItem, Reject, SecretKind};
 
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
