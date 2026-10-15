@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust stable
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace --release
+      - name: Build
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipvault-test-build
+          path: |
+            target/release/Clipvault.exe
+            target/release/clipvault-cli.exe
+          retention-days: 3
+
+  # Needs a real interactive desktop (clipboard, hotkey, SendInput). If the runner session does not give one
+  # the step fails without failing the build: the local result of scripts/e2e.ps1 is what counts for a release.
+  e2e:
+    needs: build
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust stable
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: End-to-end check (clipboard, hotkey, paste, installer)
+        timeout-minutes: 10
+        shell: pwsh
+        run: .\scripts\e2e.ps1
