@@ -20,7 +20,7 @@ impl Default for Install {
     fn default() -> Self {
         Install {
             desktop: true,
-            autostart: false,
+            autostart: true,
             job: None,
             result: None,
         }

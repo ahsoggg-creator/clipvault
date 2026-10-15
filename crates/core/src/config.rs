@@ -91,6 +91,8 @@ pub struct Settings {
     pub compact_position: CompactPosition,
     /// Top-left corner (screen pixels) where the compact window was left after being dragged.
     pub compact_last: Option<(i32, i32)>,
+    /// The installed copy has been set to start with Windows once (the user can switch it off afterwards).
+    pub autostart_default_applied: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +137,7 @@ impl Default for Settings {
             compact_popup: true,
             compact_position: CompactPosition::Cursor,
             compact_last: None,
+            autostart_default_applied: false,
         }
     }
 }

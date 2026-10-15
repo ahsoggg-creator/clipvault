@@ -221,6 +221,36 @@ fn single_instance(replace: bool, admin: bool) -> bool {
     false
 }
 
+/// The installed copy starts with Windows by default; this is applied once, so switching it off later sticks.
+fn first_run_autostart(shared: &Shared) {
+    let mut st = shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+    if st.autostart_default_applied || !winint::running_installed() {
+        return;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = winint::set_autostart(true, &exe);
+    }
+    st.autostart_default_applied = true;
+    st.save();
+}
+
+/// Windows 11 puts a new tray icon into the overflow flyout; ask for it to stay on the taskbar. Windows creates
+/// the icon's settings entry some time after the icon first appears, so this tries for a minute.
+fn keep_tray_icon_visible() {
+    std::thread::Builder::new()
+        .name("clipvault-tray".into())
+        .spawn(|| {
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if winint::promote_tray_icon() {
+                    diag::info("the tray icon is set to stay on the taskbar");
+                    break;
+                }
+            }
+        })
+        .ok();
+}
+
 /// A daily look at GitHub; a found update is announced with a notification and a button in the window.
 fn start_update_loop(shared: Arc<Shared>, state: update::Shared) {
     std::thread::Builder::new()
@@ -328,6 +358,8 @@ fn main() -> eframe::Result {
             diag::info(format!("Clipvault {} started", env!("CARGO_PKG_VERSION")));
             platform::spawn(shared.clone(), !admin);
             if !admin {
+                first_run_autostart(&shared);
+                keep_tray_icon_visible();
                 start_update_loop(shared.clone(), update_state.clone());
             }
         }

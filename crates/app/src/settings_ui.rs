@@ -582,7 +582,7 @@ impl App {
             } else if ui.button(S::InstallHere.get(lang)).clicked() {
                 let opts = winint::InstallOptions {
                     desktop_shortcut: false,
-                    autostart: false,
+                    autostart: true,
                 };
                 match winint::install(opts, false) {
                     Ok(exe) => {

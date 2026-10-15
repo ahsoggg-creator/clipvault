@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-    RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW};
 
@@ -149,6 +149,74 @@ pub fn autostart_enabled() -> bool {
             std::ptr::null_mut(),
             &mut size,
         ) == ERROR_SUCCESS
+    }
+}
+
+const NOTIFY_KEY: &str = r"Control Panel\NotifyIconSettings";
+
+fn same_path(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    norm(a) == norm(b)
+}
+
+/// Windows 11 hides a new tray icon in the overflow flyout. Marks Clipvault's icon as "promoted" (shown on the
+/// taskbar) in `NotifyIconSettings`. Returns true when the icon's entry exists and is promoted.
+///
+/// The entry only appears after the icon has been shown once, so the caller tries again for a while.
+pub fn promote_tray_icon() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let exe = exe.display().to_string();
+    let Some(root) = open_key(NOTIFY_KEY, KEY_READ) else {
+        return false; // an older Windows: the icon is not hidden by default
+    };
+    let mut index = 0u32;
+    loop {
+        let mut name = [0u16; 256];
+        let mut len = name.len() as u32;
+        // SAFETY: the buffer and its length describe the same live array; the other out-parameters are optional.
+        let rc = unsafe {
+            RegEnumKeyExW(
+                root.0,
+                index,
+                name.as_mut_ptr(),
+                &mut len,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if rc != ERROR_SUCCESS {
+            return false;
+        }
+        index += 1;
+        let sub = format!("{NOTIFY_KEY}\\{}", String::from_utf16_lossy(&name[..len as usize]));
+        let Some(k) = open_key(&sub, KEY_READ | KEY_WRITE) else {
+            continue;
+        };
+        let n = wide("ExecutablePath");
+        let mut buf = [0u16; 1024];
+        let mut size = std::mem::size_of_val(&buf) as u32;
+        // SAFETY: the buffer and its byte size describe the same live array.
+        let rc = unsafe {
+            RegQueryValueExW(
+                k.0,
+                n.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        if rc != ERROR_SUCCESS {
+            continue;
+        }
+        let path = String::from_utf16_lossy(&buf[..(size as usize / 2).min(buf.len())]);
+        if same_path(path.trim_end_matches('\0'), &exe) {
+            return set_dword(&k, "IsPromoted", 1).is_ok();
+        }
     }
 }
 
