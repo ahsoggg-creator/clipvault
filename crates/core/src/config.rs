@@ -70,6 +70,8 @@ pub struct Settings {
     pub replace_win_v: bool,
     /// The popup opens next to the mouse cursor instead of the middle of the screen.
     pub popup_at_cursor: bool,
+    /// The hotkey opens a small quick-paste window (click an entry to paste it); the tray opens the full window.
+    pub compact_popup: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +113,7 @@ impl Default for Settings {
             ],
             replace_win_v: false,
             popup_at_cursor: false,
+            compact_popup: true,
         }
     }
 }
@@ -168,5 +171,9 @@ mod tests {
         assert_eq!(s.max_items, 50);
         assert_eq!(s.hotkey, "Ctrl+Alt+V");
         assert!(s.auto_update);
+        assert!(
+            s.compact_popup,
+            "a settings file from an older version gets the compact window"
+        );
     }
 }

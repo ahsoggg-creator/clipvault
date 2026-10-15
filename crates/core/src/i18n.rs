@@ -60,9 +60,20 @@ strings! {
     InMemoryOnly => ("только в памяти", "memory only"),
     Masked => ("скрыто", "masked"),
     HintsLine => (
-        "Enter — вставить · 1–9 — вставить по номеру · Ctrl+P — закрепить · Ctrl+D — удалить · Esc — закрыть",
-        "Enter — paste · 1–9 — paste by number · Ctrl+P — pin · Ctrl+D — delete · Esc — close"
+        "Enter — вставить · Shift+Enter — как текст · 1–9 — по номеру · Ctrl+P — закрепить · Ctrl+D — удалить · Esc — закрыть",
+        "Enter — paste · Shift+Enter — as text · 1–9 — by number · Ctrl+P — pin · Ctrl+D — delete · Esc — close"
     ),
+    // the compact quick-paste window
+    CompactHints => (
+        "Клик — вставить · Ctrl+клик — выбрать несколько · Shift+клик — как текст",
+        "Click — paste · Ctrl+click — pick several · Shift+click — as plain text"
+    ),
+    BtnExpand => ("Открыть полное окно", "Open the full window"),
+    PasteSelected => ("Вставить выбранные ({0})", "Paste selected ({0})"),
+    ClearSelection => ("Снять выбор", "Clear selection"),
+    PasteAsText => ("Вставить как текст", "Paste as plain text"),
+    PinHover => ("Закрепить / открепить", "Pin / unpin"),
+    DeleteHover => ("Удалить запись", "Delete the entry"),
     AgoNow => ("только что", "just now"),
     AgoMin => ("{0} мин назад", "{0} min ago"),
     AgoHour => ("{0} ч назад", "{0} h ago"),
@@ -180,7 +191,21 @@ strings! {
     Language => ("Язык", "Language"),
     PopupHotkey => ("Сочетание для окна", "Popup hotkey"),
     Change => ("Изменить", "Change"),
-    PressKeys => ("Нажмите сочетание клавиш…", "Press the key combination…"),
+    PressKeys => ("Нажмите сочетание клавиш… (Esc — отмена)", "Press the key combination… (Esc cancels)"),
+    PressKeysClear => (
+        "Нажмите сочетание клавиш… (Esc — отмена, Backspace — очистить)",
+        "Press the key combination… (Esc cancels, Backspace clears)"
+    ),
+    RecordHotkey => ("Нажмите, чтобы записать сочетание клавиш", "Click to record a key combination"),
+    HotkeyNotSet => ("не задано", "not set"),
+    HotkeyWinNote => (
+        "Сочетания с Win часть Windows оставляет себе (Win+L, Win+E…) — выберите другое, если не сработает.",
+        "Windows keeps some Win combinations for itself (Win+L, Win+E…) — pick another if it does not work."
+    ),
+    CompactPopup => (
+        "По сочетанию открывать компактное окно быстрой вставки (как Win+V): клик по записи сразу вставляет",
+        "Open a compact quick-paste window on the hotkey (like Win+V): a click on an entry pastes it"
+    ),
     HotkeyNote => (
         "Win+V зарезервировано Windows, поэтому окно вызывается другим сочетанием.",
         "Win+V is reserved by Windows, so the popup uses a different hotkey."

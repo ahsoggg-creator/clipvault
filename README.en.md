@@ -29,6 +29,10 @@ stays on your computer: no cloud, no sync, no telemetry.
 - **A popup on `Ctrl+Alt+V`** (configurable; `Win+V` is reserved by Windows): instant fuzzy search as you type,
   filters by type, application and date, a preview, pasting with `Enter` or a digit `1–9`, pinning (`Ctrl+P`),
   deleting (`Ctrl+D`), "Clear all".
+- **A compact quick-paste window** (like `Win+V`): the hotkey opens a narrow window where **one click** on an entry pastes it
+  right away. `Ctrl+click` picks several entries and pastes them line by line, `Shift+click` or `Shift+Enter` pastes as plain
+  text; hovering shows pin / delete buttons and a preview tooltip. The full window opens from the tray or with a button in the
+  header; the behaviour is switchable in Settings. Hotkeys are now **recorded by pressing them** (Esc cancels, Backspace clears).
 - **Secret protection (0.2.0).** Before anything is written to disk Clipvault looks for secrets: keys and tokens
   (`sk-…`, `ghp_`/`github_pat_`, `AKIA…`, `xox…`, JWT), private keys (`-----BEGIN … PRIVATE KEY-----`), connection
   strings, BIP-39 seed phrases, card numbers (Luhn), password-looking strings (adjustable sensitivity) and your own

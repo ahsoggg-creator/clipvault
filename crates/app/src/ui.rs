@@ -19,6 +19,7 @@ use crate::theme;
 use crate::{App, platform};
 
 const ROW_H: f32 = 40.0;
+pub(crate) const MARK: Color32 = Color32::from_rgb(190, 180, 255);
 const DAY: u64 = 86_400;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -61,11 +62,16 @@ pub struct Popup {
     pub shown_at: Instant,
     pub was_focused: bool,
     pub confirm_clear: bool,
-    tex: Option<(u64, TextureHandle)>,
-    pub capture_hotkey: bool,
+    pub tex: Option<(u64, TextureHandle)>,
+    /// The hotkey field that is recording a combination right now.
+    pub capturing: Option<egui::Id>,
+    /// The title strip is being dragged.
+    pub drag: Option<platform::Drag>,
+    /// Entries picked with Ctrl+click, in the order they were picked: pasted together.
+    pub marked: Vec<u64>,
     /// The Win+V setting changed and Explorer has not been restarted yet.
     pub win_v_hint: bool,
-    scroll_to_selected: bool,
+    pub scroll_to_selected: bool,
     pub focus_search: bool,
     pub toast: Option<(String, Instant)>,
     /// The memory-only secret whose text the user chose to show.
@@ -99,7 +105,9 @@ impl Default for Popup {
             was_focused: false,
             confirm_clear: false,
             tex: None,
-            capture_hotkey: false,
+            capturing: None,
+            drag: None,
+            marked: Vec::new(),
             win_v_hint: false,
             scroll_to_selected: false,
             focus_search: true,
@@ -130,7 +138,9 @@ impl Popup {
         self.date = DateFilter::Any;
         self.pinned_only = false;
         self.confirm_clear = false;
-        self.capture_hotkey = false;
+        self.capturing = None;
+        self.drag = None;
+        self.marked.clear();
         self.selected = None;
         self.revealed = None;
         self.texts_loaded = false;
@@ -186,7 +196,7 @@ pub fn transform_label(t: Transform) -> S {
     }
 }
 
-fn one_line(text: &str, max: usize) -> String {
+pub(crate) fn one_line(text: &str, max: usize) -> String {
     let mut out = String::new();
     let mut last_space = true;
     for c in text.chars() {
@@ -256,7 +266,7 @@ impl App {
         }
     }
 
-    fn selected_index(&self) -> Option<usize> {
+    pub(crate) fn selected_index(&self) -> Option<usize> {
         let id = self.popup.selected?;
         self.popup.results.iter().position(|&r| r == id)
     }
@@ -293,7 +303,49 @@ impl App {
         platform::post(platform::WM_PASTE);
     }
 
-    fn apply_transform(&mut self, t: Transform, text: &str) {
+    /// The entry as plain text: the formatting, the image or the file list is left out of the paste.
+    pub(crate) fn paste_as_text(&mut self, id: u64) {
+        let text = {
+            let h = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+            h.get(id)
+                .filter(|i| !matches!(i.kind, Kind::Image | Kind::Files))
+                .map(|i| i.text.clone())
+        };
+        match text {
+            Some(t) => self.request_paste_text(t),
+            None => self.request_paste(id),
+        }
+    }
+
+    /// The Ctrl+clicked entries, one per line, in the order they were picked.
+    pub(crate) fn paste_marked(&mut self) {
+        let text = {
+            let h = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+            self.popup
+                .marked
+                .iter()
+                .filter_map(|id| h.get(*id))
+                .filter(|i| !matches!(i.kind, Kind::Image | Kind::Files))
+                .map(|i| i.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        self.popup.marked.clear();
+        if !text.is_empty() {
+            self.request_paste_text(text);
+        }
+    }
+
+    pub(crate) fn toggle_marked(&mut self, id: u64) {
+        match self.popup.marked.iter().position(|m| *m == id) {
+            Some(p) => {
+                self.popup.marked.remove(p);
+            }
+            None => self.popup.marked.push(id),
+        }
+    }
+
+    pub(crate) fn apply_transform(&mut self, t: Transform, text: &str) {
         let lang = self.shared.lang();
         match t.apply(text) {
             Ok(out) => self.request_paste_text(out),
@@ -303,7 +355,7 @@ impl App {
         }
     }
 
-    fn pin_selected(&mut self) {
+    pub(crate) fn pin_selected(&mut self) {
         if let Some(id) = self.popup.selected {
             let mut h = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
             let pinned = h.get(id).is_some_and(|i| i.pinned);
@@ -311,7 +363,7 @@ impl App {
         }
     }
 
-    fn delete_selected(&mut self) {
+    pub(crate) fn delete_selected(&mut self) {
         let Some(id) = self.popup.selected else { return };
         let next = self
             .selected_index()
@@ -328,10 +380,11 @@ impl App {
 
     fn keys(&mut self, ctx: &egui::Context) {
         let none = Modifiers::NONE;
-        let (down, up, enter, esc, pin, del) = ctx.input_mut(|i| {
+        let (down, up, plain, enter, esc, pin, del) = ctx.input_mut(|i| {
             (
                 i.consume_key(none, Key::ArrowDown),
                 i.consume_key(none, Key::ArrowUp),
+                i.consume_key(Modifiers::SHIFT, Key::Enter),
                 i.consume_key(none, Key::Enter),
                 i.consume_key(none, Key::Escape),
                 i.consume_key(Modifiers::COMMAND, Key::P),
@@ -360,8 +413,14 @@ impl App {
         if up {
             self.move_selection(-1);
         }
-        if enter && let Some((sid, _)) = self.popup.keyword_snippet.clone() {
+        if (enter || plain)
+            && let Some((sid, _)) = self.popup.keyword_snippet.clone()
+        {
             self.paste_snippet(sid);
+        } else if (enter || plain) && !self.popup.marked.is_empty() {
+            self.paste_marked();
+        } else if plain && let Some(id) = self.popup.selected {
+            self.paste_as_text(id);
         } else if enter && let Some(id) = self.popup.selected {
             self.request_paste(id);
         }
@@ -379,6 +438,8 @@ impl App {
         if esc {
             if !self.popup.query.is_empty() {
                 self.popup.query.clear();
+            } else if !self.popup.marked.is_empty() {
+                self.popup.marked.clear();
             } else if self.popup.view == View::Settings {
                 self.popup.view = View::History;
             } else if !self.shared.demo {
@@ -401,6 +462,7 @@ impl App {
             };
             self.popup.shown_at = Instant::now();
             self.popup.was_focused = false;
+            platform::capture_end();
             let _ = self.shared.history.lock().unwrap_or_else(|e| e.into_inner()).refresh();
         }
         // hide when the window loses the focus, like Win+V does
@@ -411,6 +473,7 @@ impl App {
             && self.popup.shown_at.elapsed() > Duration::from_millis(400)
             && !self.shared.demo
             && self.popup.view == View::History
+            && self.popup.drag.is_none()
         {
             platform::hide_popup();
             self.popup.was_focused = false;
@@ -428,10 +491,21 @@ impl App {
         };
         if self.popup.view == View::History {
             self.keys(&ctx);
-        } else if self.popup.view == View::Snippets && ctx.input(|i| i.key_pressed(Key::Escape)) {
+        } else if self.popup.view == View::Snippets
+            && self.popup.capturing.is_none()
+            && ctx.input(|i| i.key_pressed(Key::Escape))
+        {
             platform::hide_popup();
         }
 
+        let compact =
+            self.popup.view == View::History && !self.shared.demo && self.shared.compact.load(Ordering::SeqCst);
+        if compact {
+            egui::Panel::top("header").show(ui, |ui| self.compact_header(ui));
+            egui::Panel::bottom("footer").show(ui, |ui| self.compact_footer(ui));
+            egui::CentralPanel::default().show(ui, |ui| self.compact_list(ui, now));
+            return;
+        }
         egui::Panel::top("header").show(ui, |ui| self.header(ui));
         egui::Panel::bottom("footer").show(ui, |ui| self.footer(ui));
         match self.popup.view {
@@ -449,22 +523,39 @@ impl App {
         }
     }
 
+    /// The title row doubles as the handle of the borderless window. It is registered before the buttons so that
+    /// they sit on top of it and still get their clicks; the window follows the mouse wherever it goes, across
+    /// monitors included.
+    pub(crate) fn drag_strip(&mut self, ui: &mut Ui, height: f32) {
+        if self.shared.demo {
+            return;
+        }
+        let row = ui.available_rect_before_wrap();
+        let area = egui::Rect::from_min_size(row.min, vec2(row.width(), height));
+        let resp = ui.interact(area, ui.id().with("drag"), Sense::drag());
+        if resp.is_pointer_button_down_on() {
+            if self.popup.drag.is_none() {
+                self.popup.drag = platform::drag_begin();
+            }
+        } else {
+            self.popup.drag = None;
+        }
+        if resp.dragged()
+            && let Some(d) = self.popup.drag
+        {
+            platform::drag_to(&d);
+            // the window moves under a still pointer, so no mouse event would ask for the next frame
+            ui.ctx().request_repaint();
+        }
+    }
+
     fn header(&mut self, ui: &mut Ui) {
         let lang = self.shared.lang();
         let (paused, incognito) = (
             self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).paused,
             self.shared.incognito.load(Ordering::Relaxed),
         );
-        // the title row doubles as the drag handle of the borderless window; it is registered before the
-        // buttons so that they sit on top of it and still receive their clicks
-        let row = ui.available_rect_before_wrap();
-        let drag_area = egui::Rect::from_min_size(row.min, vec2(row.width(), 28.0));
-        if ui
-            .interact(drag_area, ui.id().with("drag"), Sense::drag())
-            .drag_started()
-        {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
+        self.drag_strip(ui, 28.0);
         ui.horizontal(|ui| {
             if let Some(icon) = &self.icon {
                 ui.add(egui::Image::new(icon).fit_to_exact_size(vec2(22.0, 22.0)));
@@ -535,7 +626,7 @@ impl App {
         ui.add_space(2.0);
     }
 
-    fn filters(&mut self, ui: &mut Ui, lang: Lang) {
+    pub(crate) fn search_box(&mut self, ui: &mut Ui, lang: Lang) {
         let search = ui.add(
             egui::TextEdit::singleline(&mut self.popup.query)
                 .hint_text(S::SearchHint.get(lang))
@@ -550,6 +641,10 @@ impl App {
         if let Some((_, name)) = &self.popup.keyword_snippet {
             ui.label(RichText::new(clipvault_core::i18n::fmt(S::SnipKeywordHint, lang, &[name])).color(theme::GOOD));
         }
+    }
+
+    fn filters(&mut self, ui: &mut Ui, lang: Lang) {
+        self.search_box(ui, lang);
         ui.horizontal_wrapped(|ui| {
             if theme::chip(ui, S::All.get(lang), self.popup.kind.is_none(), theme::ACCENT).clicked() {
                 self.popup.kind = None;
@@ -686,33 +781,39 @@ impl App {
                         action = Some((item.id, RowAction::Paste));
                     }
                     let id = item.id;
-                    let pinned = item.pinned;
-                    resp.context_menu(|ui| {
-                        if ui.button(S::Paste.get(lang)).clicked() {
-                            action = Some((id, RowAction::Paste));
-                            ui.close();
-                        }
-                        let pin = if pinned { S::Unpin } else { S::Pin };
-                        if ui.button(pin.get(lang)).clicked() {
-                            action = Some((id, RowAction::Pin));
-                            ui.close();
-                        }
-                        if ui.button(S::Delete.get(lang)).clicked() {
-                            action = Some((id, RowAction::Delete));
-                            ui.close();
-                        }
-                    });
+                    if let Some(a) = row_menu(&resp, item, lang) {
+                        action = Some((id, a));
+                    }
                 }
             });
         if let Some(id) = clicked {
             self.popup.selected = Some(id);
         }
         if let Some((id, a)) = action {
-            self.popup.selected = Some(id);
-            match a {
-                RowAction::Paste => self.request_paste(id),
-                RowAction::Pin => self.pin_selected(),
-                RowAction::Delete => self.delete_selected(),
+            self.row_action(id, a);
+        }
+    }
+
+    /// What a click or a menu choice on an entry does; the entry becomes the selected one.
+    pub(crate) fn row_action(&mut self, id: u64, a: RowAction) {
+        self.popup.selected = Some(id);
+        match a {
+            RowAction::Paste => self.request_paste(id),
+            RowAction::PasteText => self.paste_as_text(id),
+            RowAction::Mark => self.toggle_marked(id),
+            RowAction::Pin => self.pin_selected(),
+            RowAction::Delete => self.delete_selected(),
+            RowAction::Transform(t) => {
+                let text = self
+                    .shared
+                    .history
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(id)
+                    .map(|i| i.text.clone());
+                if let Some(text) = text {
+                    self.apply_transform(t, &text);
+                }
             }
         }
     }
@@ -836,10 +937,78 @@ impl App {
 }
 
 #[derive(Clone, Copy)]
-enum RowAction {
+pub(crate) enum RowAction {
     Paste,
+    PasteText,
+    /// Ctrl+click: add to / remove from the entries that are pasted together.
+    Mark,
     Pin,
     Delete,
+    Transform(Transform),
+}
+
+/// The right-click menu of an entry, shared by the full list and the compact one.
+pub(crate) fn row_menu(resp: &egui::Response, item: &Item, lang: Lang) -> Option<RowAction> {
+    let mut action = None;
+    resp.context_menu(|ui| {
+        if ui.button(S::Paste.get(lang)).clicked() {
+            action = Some(RowAction::Paste);
+            ui.close();
+        }
+        if !matches!(item.kind, Kind::Image | Kind::Files) {
+            if item.kind == Kind::Rich && ui.button(S::PasteAsText.get(lang)).clicked() {
+                action = Some(RowAction::PasteText);
+                ui.close();
+            }
+            if !item.volatile {
+                ui.menu_button(S::TransformMenu.get(lang), |ui| {
+                    for t in Transform::ALL {
+                        if ui.button(transform_label(t).get(lang)).clicked() {
+                            action = Some(RowAction::Transform(t));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        }
+        let pin = if item.pinned { S::Unpin } else { S::Pin };
+        if ui.button(pin.get(lang)).clicked() {
+            action = Some(RowAction::Pin);
+            ui.close();
+        }
+        if ui.button(S::Delete.get(lang)).clicked() {
+            action = Some(RowAction::Delete);
+            ui.close();
+        }
+    });
+    action
+}
+
+/// One line that stands for an entry in a list.
+pub(crate) fn entry_label(item: &Item, lang: Lang) -> String {
+    match item.kind {
+        Kind::Image => {
+            let (w, h) = item.img.unwrap_or((0, 0));
+            format!("{} {w}×{h}", S::ImageLabel.get(lang))
+        }
+        Kind::Files => {
+            let n = item.text.lines().count();
+            let first = item
+                .text
+                .lines()
+                .next()
+                .unwrap_or("")
+                .rsplit('\\')
+                .next()
+                .unwrap_or("")
+                .to_owned();
+            format!("{first}  ({} {})", S::FilesLabel.get(lang), n.saturating_sub(1))
+        }
+        _ if item.volatile => item
+            .secret
+            .map_or_else(|| "••••••••".to_owned(), |k| clipvault_core::guard::mask_text(k, lang)),
+        _ => one_line(&item.text, 90),
+    }
 }
 
 fn row(
@@ -880,29 +1049,7 @@ fn row(
         }
     }
     let text_x = x0 + 48.0;
-    let label = match item.kind {
-        Kind::Image => {
-            let (w, h) = item.img.unwrap_or((0, 0));
-            format!("{} {w}×{h}", S::ImageLabel.get(lang))
-        }
-        Kind::Files => {
-            let n = item.text.lines().count();
-            let first = item
-                .text
-                .lines()
-                .next()
-                .unwrap_or("")
-                .rsplit('\\')
-                .next()
-                .unwrap_or("")
-                .to_owned();
-            format!("{first}  ({} {})", S::FilesLabel.get(lang), n.saturating_sub(1))
-        }
-        _ if item.volatile => item
-            .secret
-            .map_or_else(|| "••••••••".to_owned(), |k| clipvault_core::guard::mask_text(k, lang)),
-        _ => one_line(&item.text, 90),
-    };
+    let label = entry_label(item, lang);
     let right = format!(
         "{}{}",
         if item.source_app.is_empty() {

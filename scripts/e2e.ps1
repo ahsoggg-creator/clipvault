@@ -22,6 +22,8 @@ Add-Type -Namespace E2E -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+public struct RECT { public int L, T, R, B; }
 '@
 
 $script:fail = 0
@@ -34,6 +36,7 @@ function Press([byte[]]$mods, [byte]$key) {
     [E2E.Win]::keybd_event($key, 0, 2, [UIntPtr]::Zero)
     foreach ($m in $mods) { [E2E.Win]::keybd_event($m, 0, 2, [UIntPtr]::Zero) }
 }
+function Popup-Width($title = "Clipvault") { $h = [E2E.Win]::FindWindow([NullString]::Value, $title); $r = New-Object E2E.Win+RECT; [void][E2E.Win]::GetWindowRect($h, [ref]$r); $r.R - $r.L }
 function Popup-Visible($title = "Clipvault") { $h = [E2E.Win]::FindWindow([NullString]::Value, $title); $h -ne [IntPtr]::Zero -and [E2E.Win]::IsWindowVisible($h) }
 
 $data = Join-Path $env:TEMP ("clipvault-e2e-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
@@ -87,7 +90,7 @@ try {
             switch ($script:step) {
                 0 { $form.Activate(); [E2E.Win]::SetForegroundWindow($form.Handle) | Out-Null; $tb.Focus() | Out-Null }
                 1 { Press @(0x11, 0x12) 0x56 }                                  # Ctrl+Alt+V
-                2 { $script:visible = Popup-Visible }
+                2 { $script:visible = Popup-Visible; $script:width = Popup-Width }
                 3 { Press @() 0x0D }                                            # Enter: paste the selected (top) entry
                 5 { $script:text = $tb.Text; $script:after = Popup-Visible; $timer.Stop(); $form.Close() }
             }
@@ -100,6 +103,7 @@ try {
     }
     if (-not ($script:text -match [regex]::Escape("$marker first entry"))) { Write-Host "--- history order ---"; & $Cli list }
     Check "hotkey opens the popup" ([bool]$script:visible)
+    Check "the hotkey opens the compact quick-paste window, not the full one" (($script:width -gt 200) -and ($script:width -lt 700)) "width=$($script:width)"
     Check "popup closes after paste" (-not $script:after)
     Check "Enter pastes the top entry into the focused window" ($script:text -match [regex]::Escape("$marker first entry")) "got [$($script:text)]"
 

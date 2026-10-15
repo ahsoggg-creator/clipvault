@@ -224,10 +224,13 @@ impl App {
                     ui.end_row();
                     ui.label(S::SnipHotkey.get(lang));
                     ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut d.hotkey)
-                                .desired_width(160.0)
-                                .hint_text("Ctrl+Alt+1"),
+                        crate::settings_ui::hotkey_field(
+                            ui,
+                            &mut self.popup.capturing,
+                            "snip_hotkey",
+                            &mut d.hotkey,
+                            true,
+                            lang,
                         );
                         if !d.hotkey.trim().is_empty() && parse_hotkey(&d.hotkey).is_none() {
                             ui.label(RichText::new(S::SnipHotkeyBad.get(lang)).color(theme::BAD));

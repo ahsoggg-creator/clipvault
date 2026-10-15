@@ -6,6 +6,7 @@
 //! and the demo (`--demo`, `--screenshots <dir>`).
 
 mod capture;
+mod compact_ui;
 mod demo;
 mod diag;
 mod installer;
@@ -351,7 +352,7 @@ fn main() -> eframe::Result {
         });
     }
     if is_app {
-        viewport = viewport.with_min_inner_size([760.0, 480.0]).with_taskbar(demo);
+        viewport = viewport.with_min_inner_size([300.0, 300.0]).with_taskbar(demo);
         if !demo {
             viewport = viewport
                 .with_decorations(false)

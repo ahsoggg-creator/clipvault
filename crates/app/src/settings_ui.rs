@@ -1,88 +1,97 @@
 //! The settings view inside the popup window.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clipvault_core::config::Lang;
-use clipvault_core::hotkey::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, format_hotkey};
 use clipvault_core::i18n::S;
-use eframe::egui::{self, Key, RichText, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 use crate::{App, diag, platform, update, winint};
 
-fn vk_of(key: Key) -> Option<u32> {
-    let n = key.name();
-    let b = n.as_bytes();
-    if b.len() == 1 && b[0].is_ascii_alphanumeric() {
-        return Some(u32::from(b[0].to_ascii_uppercase()));
+/// Writes the settings and re-registers the global hotkeys, but only when something changed.
+fn drop_and_apply(st: std::sync::MutexGuard<'_, clipvault_core::config::Settings>, changed: bool) {
+    if changed {
+        st.save();
     }
-    let named = [
-        (Key::Space, 0x20),
-        (Key::Enter, 0x0D),
-        (Key::Tab, 0x09),
-        (Key::Insert, 0x2D),
-        (Key::Delete, 0x2E),
-        (Key::Home, 0x24),
-        (Key::End, 0x23),
-        (Key::PageUp, 0x21),
-        (Key::PageDown, 0x22),
-    ];
-    if let Some((_, v)) = named.iter().find(|(k, _)| *k == key) {
-        return Some(*v);
+    drop(st);
+    if changed {
+        platform::post(platform::WM_REHOTKEY);
     }
-    n.strip_prefix('F')
-        .and_then(|f| f.parse::<u32>().ok())
-        .filter(|f| (1..=24).contains(f))
-        .map(|f| 0x6F + f)
+}
+
+/// A button that shows a hotkey and records a new one when it is clicked: the next combination pressed on the
+/// physical keyboard (modifiers + a key) is taken, Esc cancels and, when `clearable`, Backspace empties the field.
+/// Returns true when the value changed.
+pub(crate) fn hotkey_field(
+    ui: &mut Ui,
+    capturing: &mut Option<egui::Id>,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    value: &mut String,
+    clearable: bool,
+    lang: Lang,
+) -> bool {
+    let me = ui.make_persistent_id(salt);
+    let mut changed = false;
+    if *capturing == Some(me) {
+        let focused = ui.ctx().input(|i| i.viewport().focused.unwrap_or(true));
+        let seen = if focused {
+            platform::poll_capture()
+        } else {
+            platform::Capture::Cancel
+        };
+        let done = match seen {
+            platform::Capture::Got(spec) => {
+                *value = spec;
+                changed = true;
+                true
+            }
+            platform::Capture::Clear if clearable => {
+                value.clear();
+                changed = true;
+                true
+            }
+            platform::Capture::Cancel => true,
+            _ => false,
+        };
+        if done {
+            *capturing = None;
+            platform::capture_end();
+        } else {
+            let hint = if clearable { S::PressKeysClear } else { S::PressKeys };
+            ui.label(RichText::new(hint.get(lang)).color(crate::theme::ACCENT));
+            if ui.button(S::Cancel.get(lang)).clicked() {
+                *capturing = None;
+                platform::capture_end();
+            }
+            // nothing else would ask for a frame while the keys are being pressed
+            ui.ctx().request_repaint_after(Duration::from_millis(30));
+        }
+    }
+    if *capturing != Some(me) {
+        let shown = if value.trim().is_empty() {
+            S::HotkeyNotSet.get(lang).to_owned()
+        } else {
+            value.clone()
+        };
+        if ui
+            .button(RichText::new(shown).monospace().strong())
+            .on_hover_text(S::RecordHotkey.get(lang))
+            .clicked()
+        {
+            *capturing = Some(me);
+            platform::capture_begin();
+        }
+        if clearable && !value.trim().is_empty() && ui.small_button("×").on_hover_text(S::Remove.get(lang)).clicked() {
+            value.clear();
+            changed = true;
+        }
+    }
+    changed
 }
 
 impl App {
-    /// Records the next key combination while "Change" is active.
-    fn capture_hotkey(&mut self, ctx: &egui::Context) {
-        let found = ctx.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } => {
-                    let mut mods = 0;
-                    if modifiers.ctrl {
-                        mods |= MOD_CONTROL;
-                    }
-                    if modifiers.alt {
-                        mods |= MOD_ALT;
-                    }
-                    if modifiers.shift {
-                        mods |= MOD_SHIFT;
-                    }
-                    if modifiers.mac_cmd {
-                        mods |= MOD_WIN;
-                    }
-                    (mods != 0).then(|| vk_of(*key).map(|vk| (mods, vk))).flatten()
-                }
-                _ => None,
-            })
-        });
-        if let Some((mods, vk)) = found {
-            let spec = format_hotkey(mods, vk);
-            let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
-            st.hotkey = spec;
-            st.save();
-            drop(st);
-            self.popup.capture_hotkey = false;
-            platform::post(platform::WM_REHOTKEY);
-        } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
-            self.popup.capture_hotkey = false;
-        }
-    }
-
     pub fn settings_ui(&mut self, ui: &mut Ui) {
         let lang = self.shared.lang();
-        let ctx = ui.ctx().clone();
-        if self.popup.capture_hotkey {
-            self.capture_hotkey(&ctx);
-        }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.heading(S::SettingsTitle.get(lang));
             ui.add_space(6.0);
@@ -113,6 +122,7 @@ impl App {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(S::SecGeneral.get(lang)).strong());
             let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            let mut reregister = false;
             ui.horizontal(|ui| {
                 ui.label(S::Language.get(lang));
                 let before = st.lang;
@@ -132,15 +142,22 @@ impl App {
             });
             ui.horizontal(|ui| {
                 ui.label(S::PopupHotkey.get(lang));
-                if self.popup.capture_hotkey {
-                    ui.label(RichText::new(S::PressKeys.get(lang)).color(crate::theme::ACCENT));
-                } else {
-                    ui.label(RichText::new(&st.hotkey).monospace().strong());
-                    if ui.button(S::Change.get(lang)).clicked() {
-                        self.popup.capture_hotkey = true;
-                    }
+                if hotkey_field(
+                    ui,
+                    &mut self.popup.capturing,
+                    "popup_hotkey",
+                    &mut st.hotkey,
+                    false,
+                    lang,
+                ) {
+                    st.save();
+                    reregister = true;
                 }
             });
+            if reregister {
+                platform::post(platform::WM_REHOTKEY);
+            }
+            ui.label(RichText::new(S::HotkeyWinNote.get(lang)).weak().small());
             if let Some(e) = self
                 .shared
                 .hotkey_error
@@ -155,7 +172,13 @@ impl App {
                 ui.label(RichText::new(S::HotkeyNote.get(lang)).weak().small());
             }
             let mut at_cursor = st.popup_at_cursor;
+            let mut compact = st.compact_popup;
             drop(st);
+            if ui.checkbox(&mut compact, S::CompactPopup.get(lang)).changed() {
+                let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                st.compact_popup = compact;
+                st.save();
+            }
             if !self.shared.demo {
                 let mut choice = win_v;
                 ui.horizontal(|ui| {
@@ -205,7 +228,6 @@ impl App {
 
     fn sec_hotkeys(&mut self, ui: &mut Ui, lang: Lang) {
         use clipvault_core::config::TransformHotkey;
-        use clipvault_core::hotkey::parse_hotkey;
         use clipvault_core::transform::Transform;
         let card = crate::theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -213,15 +235,15 @@ impl App {
             let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
             let mut reregister = false;
             ui.horizontal(|ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut st.plain_paste_hotkey).desired_width(180.0));
-                if r.changed() {
-                    st.save();
-                }
-                if r.lost_focus() {
+                if hotkey_field(
+                    ui,
+                    &mut self.popup.capturing,
+                    "plain_hotkey",
+                    &mut st.plain_paste_hotkey,
+                    true,
+                    lang,
+                ) {
                     reregister = true;
-                }
-                if !st.plain_paste_hotkey.trim().is_empty() && parse_hotkey(&st.plain_paste_hotkey).is_none() {
-                    ui.label(RichText::new(S::HotkeyInvalid.get(lang)).color(crate::theme::BAD));
                 }
             });
             ui.label(RichText::new(S::PlainNote.get(lang)).weak().small());
@@ -230,13 +252,7 @@ impl App {
             let mut remove: Option<usize> = None;
             for (i, th) in st.transform_hotkeys.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut th.hotkey)
-                            .desired_width(150.0)
-                            .id_salt(("th", i)),
-                    );
-                    let bad = !th.hotkey.trim().is_empty() && parse_hotkey(&th.hotkey).is_none();
-                    if r.lost_focus() {
+                    if hotkey_field(ui, &mut self.popup.capturing, ("th", i), &mut th.hotkey, true, lang) {
                         reregister = true;
                     }
                     let current = Transform::parse(&th.transform);
@@ -254,9 +270,6 @@ impl App {
                                 }
                             }
                         });
-                    if bad {
-                        ui.label(RichText::new(S::HotkeyInvalid.get(lang)).color(crate::theme::BAD));
-                    }
                     if ui.button(S::Remove.get(lang)).clicked() {
                         remove = Some(i);
                     }
@@ -271,12 +284,9 @@ impl App {
                     hotkey: String::new(),
                     transform: Transform::Trim.name().to_owned(),
                 });
+                reregister = true;
             }
-            st.save();
-            drop(st);
-            if reregister {
-                platform::post(platform::WM_REHOTKEY);
-            }
+            drop_and_apply(st, reregister);
         });
         if std::mem::take(&mut self.popup.scroll_to_hotkeys) {
             ui.scroll_to_rect(card.response.rect, Some(egui::Align::TOP));
@@ -435,16 +445,21 @@ impl App {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(S::AdminBadge.get(lang)).strong());
             ui.label(RichText::new(S::AdminNote.get(lang)).weak().small());
-            let hotkey = self
-                .shared
-                .settings
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .admin_hotkey
-                .clone();
             ui.horizontal(|ui| {
                 ui.label(S::AdminHotkey.get(lang));
-                ui.label(RichText::new(hotkey).monospace().strong());
+                {
+                    let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                    if hotkey_field(
+                        ui,
+                        &mut self.popup.capturing,
+                        "admin_hotkey",
+                        &mut st.admin_hotkey,
+                        false,
+                        lang,
+                    ) {
+                        st.save();
+                    }
+                }
                 if !self.shared.admin
                     && !crate::winclip::self_elevated()
                     && ui.button(S::AdminOpen.get(lang)).clicked()

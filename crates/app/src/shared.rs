@@ -46,6 +46,10 @@ pub struct Shared {
     /// Bumped every time the popup is shown; the UI resets its search when it changes.
     pub show_seq: AtomicU64,
     pub open_settings: AtomicBool,
+    /// The popup is in its compact quick-paste shape (hotkey) rather than the full window.
+    pub compact: AtomicBool,
+    /// A hotkey is being recorded: the global hotkeys are released so that the combination reaches the recorder.
+    pub capturing: AtomicBool,
     pub paste: Mutex<Option<PasteRequest>>,
     pub toast: Mutex<Option<(String, std::time::Instant)>>,
     pub hotkey_error: Mutex<Option<String>>,
@@ -73,6 +77,8 @@ impl Shared {
             prev_foreground: AtomicIsize::new(0),
             show_seq: AtomicU64::new(0),
             open_settings: AtomicBool::new(false),
+            compact: AtomicBool::new(false),
+            capturing: AtomicBool::new(false),
             paste: Mutex::new(None),
             toast: Mutex::new(None),
             hotkey_error: Mutex::new(None),

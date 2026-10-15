@@ -60,6 +60,14 @@ fn key_code(name: &str) -> Option<u32> {
     NAMED.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| *v)
 }
 
+/// Every key a hotkey can be made of: what the recorder looks for while the user presses a combination.
+pub fn recordable_keys() -> impl Iterator<Item = u32> {
+    (0x30..=0x39u32)
+        .chain(0x41..=0x5A)
+        .chain(0x70..=0x87)
+        .chain(NAMED.iter().map(|(_, v)| *v))
+}
+
 /// Canonical text for a hotkey, e.g. `Ctrl+Alt+V`.
 pub fn format_hotkey(mods: u32, vk: u32) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -87,6 +95,14 @@ pub fn format_hotkey(mods: u32, vk: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_recordable_key_survives_a_round_trip() {
+        for vk in recordable_keys() {
+            let text = format_hotkey(MOD_CONTROL | MOD_ALT, vk);
+            assert_eq!(parse_hotkey(&text), Some((MOD_CONTROL | MOD_ALT, vk)), "{text}");
+        }
+    }
 
     #[test]
     fn parses_and_formats() {
