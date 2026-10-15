@@ -521,6 +521,8 @@ impl App {
             && !self.shared.demo
             && self.popup.view == View::History
             && self.popup.drag.is_none()
+            // with "close after pasting" off the window stays up: the paste itself takes the focus away
+            && self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).close_after_paste
         {
             platform::hide_popup();
             self.popup.was_focused = false;

@@ -336,11 +336,16 @@ fn popup_open() -> bool {
 const FULL_SIZE: (f32, f32) = (980.0, 700.0);
 const COMPACT_SIZE: (f32, f32) = (380.0, 540.0);
 
-/// The popup's size in physical pixels for the monitor the window is on now, never larger than the work area.
-fn popup_size_px(h: HWND, compact: bool, work: &RECT) -> (i32, i32) {
+/// Physical pixels per logical point on the monitor the window is on.
+fn dpi_scale(h: HWND) -> f32 {
     // SAFETY: plain handle.
     let dpi = unsafe { GetDpiForWindow(h) };
-    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+}
+
+/// The popup's size in physical pixels for the monitor the window is on now, never larger than the work area.
+fn popup_size_px(h: HWND, compact: bool, work: &RECT) -> (i32, i32) {
+    let scale = dpi_scale(h);
     let (w, hh) = if compact { COMPACT_SIZE } else { FULL_SIZE };
     (
         ((w * scale).round() as i32).min(work.right - work.left),
@@ -364,9 +369,14 @@ fn show_popup(compact: bool) {
         }
         let mut cur = POINT { x: 0, y: 0 };
         GetCursorPos(&mut cur);
-        let (at_cursor, position, last) = {
+        let (at_cursor, position, last, offset) = {
             let st = s.settings.lock().unwrap_or_else(|e| e.into_inner());
-            (st.popup_at_cursor, st.compact_position, st.compact_last)
+            (
+                st.popup_at_cursor,
+                st.compact_position,
+                st.compact_last,
+                st.compact_offset,
+            )
         };
         // "where it was left" lives on the monitor it was left on; everything else follows the mouse
         let last = last.filter(|_| compact && position == CompactPosition::Last);
@@ -397,11 +407,14 @@ fn show_popup(compact: bool) {
                         lx.clamp(r.left, (r.right - w).max(r.left)),
                         ly.clamp(r.top, (r.bottom - hh).max(r.top)),
                     ),
-                    // like Win+V: right under the mouse, pushed back inside the screen when it does not fit
-                    _ => (
-                        (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
-                        (cur.y + 16).clamp(r.top, (r.bottom - hh).max(r.top)),
-                    ),
+                    // where the settings diagram put it relative to the mouse, pushed back inside the screen
+                    _ => {
+                        let k = dpi_scale(h);
+                        (
+                            (cur.x + (offset.0 as f32 * k).round() as i32).clamp(r.left, (r.right - w).max(r.left)),
+                            (cur.y + (offset.1 as f32 * k).round() as i32).clamp(r.top, (r.bottom - hh).max(r.top)),
+                        )
+                    }
                 }
             } else if at_cursor {
                 (

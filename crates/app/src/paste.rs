@@ -55,7 +55,10 @@ pub fn run(sh: &Shared, msg_hwnd: HWND) {
         return;
     };
     let lang = sh.lang();
-    platform::hide_popup();
+    // with "close after pasting" off the window stays where it is (and keeps its search and marks)
+    if sh.settings.lock().unwrap_or_else(|e| e.into_inner()).close_after_paste {
+        platform::hide_popup();
+    }
     let target = sh.prev_foreground.load(Ordering::SeqCst) as HWND;
     let copy_only = req.copy_only;
     let Some(p) = (match req.text {

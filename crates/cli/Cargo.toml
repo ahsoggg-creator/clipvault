@@ -1,6 +1,6 @@
 [package]
 name = "clipvault-cli"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ahsoggg-creator/clipvault"
@@ -11,4 +11,4 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
-clipvault-core = { version = "0.3.6", path = "../core" }
+clipvault-core = { version = "0.3.7", path = "../core" }

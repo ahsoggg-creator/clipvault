@@ -241,7 +241,19 @@ strings! {
         "Close the window (the app stays in the tray; quit from the tray icon)"
     ),
     CompactPosLabel => ("Где открывать компактное окно", "Where the compact window opens"),
-    PosCursor => ("Под курсором мыши", "Under the mouse cursor"),
+    PosCursor => ("Возле курсора мыши (настраивается ниже)", "Near the mouse cursor (set it below)"),
+    OffsetHint => (
+        "Курсор мыши — в центре схемы. Перетащите окно туда, где оно должно появляться относительно курсора.",
+        "The mouse cursor is in the middle of the diagram. Drag the window to where it should appear relative to the cursor."
+    ),
+    OffsetValue => ("Смещение окна от курсора: {0}, {1}", "Window offset from the cursor: {0}, {1}"),
+    OffsetReset => ("Сбросить", "Reset"),
+    CursorLabel => ("курсор", "cursor"),
+    CloseAfterPaste => ("Закрывать окно после вставки", "Close the window after pasting"),
+    CloseAfterPasteNote => (
+        "Если выключить, окно остаётся открытым: можно вставить несколько записей подряд. Закрыть — Esc, «×» или повторное нажатие сочетания; само по себе оно не закроется.",
+        "When off, the window stays open so that several entries can be pasted in a row. Close it with Esc, the cross or the hotkey; it does not close by itself."
+    ),
     PosCenter => ("По центру экрана", "Center of the screen"),
     PosCorner => ("В правом нижнем углу", "Bottom-right corner"),
     PosLast => ("Там, где его оставили (перетащите окно)", "Where you left it (drag the window)"),

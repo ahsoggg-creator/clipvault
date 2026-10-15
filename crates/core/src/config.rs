@@ -93,7 +93,15 @@ pub struct Settings {
     pub compact_last: Option<(i32, i32)>,
     /// The installed copy has been set to start with Windows once (the user can switch it off afterwards).
     pub autostart_default_applied: bool,
+    /// Where the compact window's top-left corner sits relative to the mouse cursor, in logical points
+    /// (scaled by the monitor's DPI). Used by the "near the cursor" position.
+    pub compact_offset: (i32, i32),
+    /// The window closes after an entry is pasted (off: it stays open for pasting several entries).
+    pub close_after_paste: bool,
 }
+
+/// The compact window centred under the cursor, 16 points down: the starting offset.
+pub const DEFAULT_COMPACT_OFFSET: (i32, i32) = (-190, 16);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransformHotkey {
@@ -138,6 +146,8 @@ impl Default for Settings {
             compact_position: CompactPosition::Cursor,
             compact_last: None,
             autostart_default_applied: false,
+            compact_offset: DEFAULT_COMPACT_OFFSET,
+            close_after_paste: true,
         }
     }
 }
@@ -200,6 +210,8 @@ mod tests {
             "a settings file from an older version gets the compact window"
         );
         assert_eq!(s.compact_position, CompactPosition::Cursor);
+        assert_eq!(s.compact_offset, DEFAULT_COMPACT_OFFSET);
+        assert!(s.close_after_paste);
         let s: Settings = serde_json::from_str(r#"{"compact_position":"last","compact_last":[-1900,40]}"#).unwrap();
         assert_eq!(
             (s.compact_position, s.compact_last),
