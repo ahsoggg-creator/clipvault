@@ -1,0 +1,24 @@
+1 ICON "icon.ico"
+1 24 "app.manifest"
+
+1 VERSIONINFO
+FILEVERSION CV_MAJOR,CV_MINOR,CV_PATCH,0
+PRODUCTVERSION CV_MAJOR,CV_MINOR,CV_PATCH,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041904B0"
+    BEGIN
+      VALUE "CompanyName", "Clipvault"
+      VALUE "FileDescription", "Clipvault"
+      VALUE "ProductName", "Clipvault"
+      VALUE "OriginalFilename", "Clipvault.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x419, 1200
+  END
+END

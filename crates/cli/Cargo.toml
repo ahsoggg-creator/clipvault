@@ -10,3 +10,5 @@ name = "clipvault-cli"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+clipvault-core = { version = "0.1.0", path = "../core" }
