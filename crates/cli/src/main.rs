@@ -1,13 +1,14 @@
 //! `clipvault-cli`: the history from a terminal. It opens the same encrypted vault as the app
 //! (the key is unwrapped by Windows DPAPI for the current user), so it only works for the user who owns it.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use clipvault_core::config::open_history;
 use clipvault_core::timefmt::format_utc;
+use clipvault_core::transform::Transform;
 use clipvault_core::{History, Item, Kind, Query};
 
 #[derive(Parser)]
@@ -49,6 +50,14 @@ enum Cmd {
         /// Записать в файл вместо stdout (обязательно для изображений)
         #[arg(short, long)]
         out: Option<PathBuf>,
+    },
+    /// Преобразовать текст: stdin → stdout (`--list` — все имена)
+    Transform {
+        /// Имя преобразования, например json-format, base64-decode, layout-auto
+        name: Option<String>,
+        /// Показать список преобразований
+        #[arg(short, long)]
+        list: bool,
     },
     /// Удалить историю (закреплённые можно оставить)
     Purge {
@@ -142,6 +151,7 @@ fn run(cli: Cli, h: &mut History) -> Result<(), String> {
                 }
             }
         }
+        Cmd::Transform { .. } => unreachable!("handled before the history is opened"),
         Cmd::Purge { keep_pinned, yes } => {
             let n = h.len();
             if !yes {
@@ -166,8 +176,52 @@ fn run(cli: Cli, h: &mut History) -> Result<(), String> {
     Ok(())
 }
 
+/// `transform` is pure text in, text out: it must work without a vault (and on any account).
+fn run_transform(name: Option<String>, list: bool) -> ExitCode {
+    if list {
+        for t in Transform::ALL {
+            println!("{}", t.name());
+        }
+        return ExitCode::SUCCESS;
+    }
+    let Some(name) = name else {
+        eprintln!("укажите имя преобразования (список: clipvault-cli transform --list)");
+        return ExitCode::FAILURE;
+    };
+    let Some(t) = Transform::parse(&name) else {
+        eprintln!("неизвестное преобразование «{name}» (список: clipvault-cli transform --list)");
+        return ExitCode::FAILURE;
+    };
+    let mut raw = Vec::new();
+    if let Err(e) = std::io::stdin().read_to_end(&mut raw) {
+        eprintln!("не удалось прочитать stdin: {e}");
+        return ExitCode::FAILURE;
+    }
+    let input = String::from_utf8_lossy(&raw);
+    // a single trailing newline from `echo` is not part of the text
+    let input = input
+        .strip_suffix("\r\n")
+        .or_else(|| input.strip_suffix('\n'))
+        .unwrap_or(&input);
+    match t.apply(input) {
+        Ok(out) => {
+            let mut o = std::io::stdout().lock();
+            let _ = o.write_all(out.as_bytes());
+            let _ = o.write_all(b"\n");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Cmd::Transform { name, list } = &cli.cmd {
+        return run_transform(name.clone(), *list);
+    }
     let mut history = match open_history() {
         Ok(h) => h,
         Err(e) => {
