@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clipvault_core::clipfmt::{Rgba, png_encode};
-use clipvault_core::{BlobKind, History, Kind, Limits, NewItem};
+use clipvault_core::config::Lang;
+use clipvault_core::guard::mask_text;
+use clipvault_core::{BlobKind, History, Kind, Limits, NewItem, SecretKind};
 use eframe::egui::{self, Event, ViewportCommand};
 
 use crate::App;
@@ -18,7 +20,7 @@ use crate::ui::View;
 const SETTLE: Duration = Duration::from_millis(1400);
 
 /// What the screenshot tour does, in order.
-const STEPS: [&str; 5] = ["history", "search", "image", "color", "settings"];
+const STEPS: [&str; 7] = ["history", "search", "image", "color", "secret", "settings", "secrets"];
 
 pub struct Demo {
     dir: Option<PathBuf>,
@@ -197,6 +199,29 @@ pub fn history(now: u64) -> History {
     for m in [250, 120] {
         add(txt("Купить молоко, хлеб, яйца", "notepad.exe", "Без имени"), mins(m));
     }
+    // what the secret filter leaves behind (the "key" is obviously made up)
+    let _ = h.add_volatile(
+        NewItem {
+            text: "sk-demo-NOT-A-REAL-KEY-0000000000000000".into(),
+            secret: Some(SecretKind::ApiKey),
+            source_app: "chrome.exe".into(),
+            ..Default::default()
+        },
+        mins(4),
+        &lim,
+    );
+    let _ = h.add(
+        NewItem {
+            kind: Some(Kind::Text),
+            text: mask_text(SecretKind::Card, Lang::Ru),
+            masked: true,
+            secret: Some(SecretKind::Card),
+            source_app: "chrome.exe".into(),
+            ..Default::default()
+        },
+        mins(33),
+        &lim,
+    );
     let _ = (milk, h.pin(addr, true));
     h
 }
@@ -227,7 +252,20 @@ impl App {
                 self.popup.kind = None;
                 self.popup.selected = first(self, Kind::Color);
             }
+            "secret" => {
+                self.popup.selected = {
+                    let h = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+                    h.query(&clipvault_core::Query::default())
+                        .iter()
+                        .find(|i| i.volatile)
+                        .map(|i| i.id)
+                };
+            }
             "settings" => self.popup.view = View::Settings,
+            "secrets" => {
+                self.popup.view = View::Settings;
+                self.popup.scroll_to_secrets = true;
+            }
             _ => {}
         }
         ctx.request_repaint();

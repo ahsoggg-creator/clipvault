@@ -88,6 +88,8 @@ impl App {
             ui.add_space(6.0);
             self.sec_general(ui, lang);
             ui.add_space(8.0);
+            self.sec_secrets(ui, lang);
+            ui.add_space(8.0);
             self.sec_limits(ui, lang);
             ui.add_space(8.0);
             if !self.shared.demo {
@@ -157,6 +159,121 @@ impl App {
                 }
             }
         });
+    }
+
+    fn sec_secrets(&mut self, ui: &mut Ui, lang: Lang) {
+        use clipvault_core::guard::SecretPolicy;
+        use clipvault_core::secrets::{Detector, Sensitivity};
+        if !self.popup.texts_loaded {
+            let st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            self.popup.custom_text = st.custom_patterns.join(
+                "
+",
+            );
+            self.popup.blacklist_text = st.blacklist.join(
+                "
+",
+            );
+            self.popup.texts_loaded = true;
+        }
+        let card = crate::theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(S::SecretsSection.get(lang)).strong());
+            let mut changed = false;
+            let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            changed |= ui
+                .checkbox(&mut st.secrets_enabled, S::SecretsEnabled.get(lang))
+                .changed();
+            ui.add_enabled_ui(st.secrets_enabled, |ui| {
+                ui.label(S::PolicyLabel.get(lang));
+                for (p, label) in [
+                    (SecretPolicy::DontStore, S::PolicyDont),
+                    (SecretPolicy::MemoryOnly, S::PolicyMemory),
+                    (SecretPolicy::Mask, S::PolicyMask),
+                ] {
+                    changed |= ui.radio_value(&mut st.secret_policy, p, label.get(lang)).changed();
+                }
+                if st.secret_policy == SecretPolicy::MemoryOnly {
+                    ui.horizontal(|ui| {
+                        ui.label(S::ClearAfter.get(lang));
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut st.secret_clear_secs).range(1..=3600))
+                            .changed();
+                    });
+                }
+                ui.horizontal(|ui| {
+                    ui.label(S::SensitivityLabel.get(lang));
+                    let name = |s: Sensitivity| match s {
+                        Sensitivity::Off => S::SensOff,
+                        Sensitivity::Low => S::SensLow,
+                        Sensitivity::Medium => S::SensMedium,
+                        Sensitivity::High => S::SensHigh,
+                    };
+                    egui::ComboBox::from_id_salt("sens")
+                        .selected_text(name(st.password_sensitivity).get(lang))
+                        .show_ui(ui, |ui| {
+                            for s in [
+                                Sensitivity::Off,
+                                Sensitivity::Low,
+                                Sensitivity::Medium,
+                                Sensitivity::High,
+                            ] {
+                                changed |= ui
+                                    .selectable_value(&mut st.password_sensitivity, s, name(s).get(lang))
+                                    .changed();
+                            }
+                        });
+                });
+                ui.label(S::CustomPatterns.get(lang));
+                if ui
+                    .add(
+                        egui::TextEdit::multiline(&mut self.popup.custom_text)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY),
+                    )
+                    .changed()
+                {
+                    st.custom_patterns = self.popup.custom_text.lines().map(str::to_owned).collect();
+                    changed = true;
+                }
+                let (_, bad) = Detector::new(Sensitivity::Off, &st.custom_patterns);
+                if !bad.is_empty() {
+                    let nums: Vec<String> = bad.iter().map(|i| (i + 1).to_string()).collect();
+                    ui.label(
+                        RichText::new(format!("{} {}", S::BadPatterns.get(lang), nums.join(", ")))
+                            .color(crate::theme::BAD),
+                    );
+                }
+            });
+            changed |= ui
+                .checkbox(&mut st.respect_app_flags, S::RespectFlags.get(lang))
+                .changed();
+            ui.label(S::BlacklistLabel.get(lang));
+            if ui
+                .add(
+                    egui::TextEdit::multiline(&mut self.popup.blacklist_text)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                )
+                .changed()
+            {
+                st.blacklist = self
+                    .popup
+                    .blacklist_text
+                    .lines()
+                    .map(|l| l.trim().to_owned())
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                changed = true;
+            }
+            ui.label(RichText::new(S::SecretsNote.get(lang)).weak().small());
+            if changed {
+                st.save();
+            }
+        });
+        if std::mem::take(&mut self.popup.scroll_to_secrets) {
+            ui.scroll_to_rect(card.response.rect, Some(egui::Align::TOP));
+        }
     }
 
     fn sec_limits(&mut self, ui: &mut Ui, lang: Lang) {
