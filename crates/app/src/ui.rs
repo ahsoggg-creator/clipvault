@@ -286,7 +286,11 @@ impl App {
             self.popup.toast = Some(("Демо: вставка отключена".into(), Instant::now()));
             return;
         }
-        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest { id, text: None });
+        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest {
+            id,
+            text: None,
+            copy_only: false,
+        });
         platform::post(platform::WM_PASTE);
     }
 
@@ -299,8 +303,39 @@ impl App {
         *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest {
             id: 0,
             text: Some(text),
+            copy_only: false,
         });
         platform::post(platform::WM_PASTE);
+    }
+
+    /// Puts the entry on the clipboard without pasting it anywhere.
+    pub(crate) fn request_copy(&mut self, id: u64) {
+        if self.shared.demo {
+            self.popup.toast = Some(("Демо: копирование отключено".into(), Instant::now()));
+            return;
+        }
+        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest {
+            id,
+            text: None,
+            copy_only: true,
+        });
+        platform::post(platform::WM_PASTE);
+    }
+
+    /// Deletes the history (the pinned entries stay when `keep_pinned`) and empties the system clipboard too.
+    pub(crate) fn clear_everything(&mut self, keep_pinned: bool) {
+        let _ = self
+            .shared
+            .history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear(keep_pinned);
+        if !self.shared.demo {
+            platform::post(platform::WM_CLEAR_CLIPBOARD);
+        }
+        self.popup.confirm_clear = false;
+        self.popup.selected = None;
+        self.popup.marked.clear();
     }
 
     /// The entry as plain text: the formatting, the image or the file list is left out of the paste.
@@ -380,10 +415,13 @@ impl App {
 
     fn keys(&mut self, ctx: &egui::Context) {
         let none = Modifiers::NONE;
-        let (down, up, plain, enter, esc, pin, del) = ctx.input_mut(|i| {
+        let (down, up, page_down, page_up, copy, plain, enter, esc, pin, del) = ctx.input_mut(|i| {
             (
                 i.consume_key(none, Key::ArrowDown),
                 i.consume_key(none, Key::ArrowUp),
+                i.consume_key(none, Key::PageDown),
+                i.consume_key(none, Key::PageUp),
+                i.consume_key(Modifiers::COMMAND, Key::Enter),
                 i.consume_key(Modifiers::SHIFT, Key::Enter),
                 i.consume_key(none, Key::Enter),
                 i.consume_key(none, Key::Escape),
@@ -412,6 +450,15 @@ impl App {
         }
         if up {
             self.move_selection(-1);
+        }
+        if page_down {
+            self.move_selection(8);
+        }
+        if page_up {
+            self.move_selection(-8);
+        }
+        if copy && let Some(id) = self.popup.selected {
+            self.request_copy(id);
         }
         if (enter || plain)
             && let Some((sid, _)) = self.popup.keyword_snippet.clone()
@@ -718,14 +765,7 @@ impl App {
                     }
                     for (label, keep) in [(S::ClearEverything, false), (S::ClearKeepPinned, true)] {
                         if ui.button(RichText::new(label.get(lang)).color(theme::BAD)).clicked() {
-                            let _ = self
-                                .shared
-                                .history
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .clear(keep);
-                            self.popup.confirm_clear = false;
-                            self.popup.selected = None;
+                            self.clear_everything(keep);
                         }
                     }
                 } else {
@@ -800,6 +840,7 @@ impl App {
         match a {
             RowAction::Paste => self.request_paste(id),
             RowAction::PasteText => self.paste_as_text(id),
+            RowAction::Copy => self.request_copy(id),
             RowAction::Mark => self.toggle_marked(id),
             RowAction::Pin => self.pin_selected(),
             RowAction::Delete => self.delete_selected(),
@@ -940,6 +981,7 @@ impl App {
 pub(crate) enum RowAction {
     Paste,
     PasteText,
+    Copy,
     /// Ctrl+click: add to / remove from the entries that are pasted together.
     Mark,
     Pin,
@@ -953,6 +995,10 @@ pub(crate) fn row_menu(resp: &egui::Response, item: &Item, lang: Lang) -> Option
     resp.context_menu(|ui| {
         if ui.button(S::Paste.get(lang)).clicked() {
             action = Some(RowAction::Paste);
+            ui.close();
+        }
+        if ui.button(S::CopyOnly.get(lang)).clicked() {
+            action = Some(RowAction::Copy);
             ui.close();
         }
         if !matches!(item.kind, Kind::Image | Kind::Files) {

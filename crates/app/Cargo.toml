@@ -1,6 +1,6 @@
 [package]
 name = "clipvault-app"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ahsoggg-creator/clipvault"
@@ -10,7 +10,7 @@ name = "Clipvault"
 path = "src/main.rs"
 
 [dependencies]
-clipvault-core = { version = "0.3.3", path = "../core" }
+clipvault-core = { version = "0.3.4", path = "../core" }
 eframe = "0.36.2"
 png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }

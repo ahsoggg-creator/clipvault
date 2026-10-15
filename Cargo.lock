@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "clipvault-app"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "clipvault-core",
  "eframe",
@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "clipvault-cli"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "clap",
  "clipvault-core",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "clipvault-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "blake3",
  "chacha20poly1305",

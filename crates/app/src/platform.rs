@@ -51,6 +51,8 @@ pub const WM_BALLOON: u32 = WM_APP + 5;
 pub const WM_QUIT_APP: u32 = WM_APP + 6;
 /// `wParam` 1 = the compact shape, 0 = the full window.
 pub const WM_MODE: u32 = WM_APP + 7;
+/// Empties the system clipboard (after "clear everything").
+pub const WM_CLEAR_CLIPBOARD: u32 = WM_APP + 8;
 
 const ID_HOTKEY_POPUP: i32 = 1;
 const ID_HOTKEY_PLAIN: i32 = 2;
@@ -383,7 +385,13 @@ fn show_popup(compact: bool) {
                 SWP_NOSIZE | SWP_NOACTIVATE,
             );
             let (w, hh) = popup_size_px(h, compact, &r);
-            let (x, y) = if at_cursor {
+            let (x, y) = if compact {
+                // like Win+V: right under the mouse, pushed back inside the screen when it does not fit
+                (
+                    (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
+                    (cur.y + 16).clamp(r.top, (r.bottom - hh).max(r.top)),
+                )
+            } else if at_cursor {
                 (
                     (cur.x - w / 2).clamp(r.left, (r.right - w).max(r.left)),
                     (cur.y - 24).clamp(r.top, (r.bottom - hh).max(r.top)),
@@ -699,6 +707,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_SHOW => {
             show_popup(false);
+            0
+        }
+        WM_CLEAR_CLIPBOARD => {
+            if crate::winclip::empty(hwnd) {
+                diag::info("the clipboard was cleared from the popup");
+            }
             0
         }
         WM_MODE => {

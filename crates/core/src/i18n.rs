@@ -43,7 +43,12 @@ strings! {
     Unpin => ("Открепить", "Unpin"),
     Delete => ("Удалить", "Delete"),
     ClearAll => ("Очистить всё", "Clear all"),
-    ClearConfirm => ("Удалить всю историю?", "Delete the whole history?"),
+    ClearConfirm => (
+        "Удалить всю историю и очистить буфер обмена?",
+        "Delete the whole history and empty the clipboard?"
+    ),
+    CopyOnly => ("Копировать (без вставки)", "Copy (do not paste)"),
+    CharsLines => ("{0} симв. · {1} строк", "{0} chars · {1} lines"),
     ClearKeepPinned => ("Кроме закреплённых", "Keep pinned"),
     ClearEverything => ("Вместе с закреплёнными", "Including pinned"),
     Cancel => ("Отмена", "Cancel"),
@@ -60,13 +65,13 @@ strings! {
     InMemoryOnly => ("только в памяти", "memory only"),
     Masked => ("скрыто", "masked"),
     HintsLine => (
-        "Enter — вставить · Shift+Enter — как текст · 1–9 — по номеру · Ctrl+P — закрепить · Ctrl+D — удалить · Esc — закрыть",
-        "Enter — paste · Shift+Enter — as text · 1–9 — by number · Ctrl+P — pin · Ctrl+D — delete · Esc — close"
+        "Enter — вставить · Shift+Enter — как текст · Ctrl+Enter — копировать · 1–9 — по номеру · Ctrl+P — закрепить · Ctrl+D — удалить · Esc — закрыть",
+        "Enter — paste · Shift+Enter — as text · Ctrl+Enter — copy · 1–9 — by number · Ctrl+P — pin · Ctrl+D — delete · Esc — close"
     ),
     // the compact quick-paste window
     CompactHints => (
-        "Клик — вставить · Ctrl+клик — выбрать несколько · Shift+клик — как текст",
-        "Click — paste · Ctrl+click — pick several · Shift+click — as plain text"
+        "Клик — вставить · Ctrl+клик — выбрать несколько · Shift+клик — как текст · Ctrl+Enter — копировать",
+        "Click — paste · Ctrl+click — pick several · Shift+click — as plain text · Ctrl+Enter — copy"
     ),
     BtnExpand => ("Открыть полное окно", "Open the full window"),
     PasteSelected => ("Вставить выбранные ({0})", "Paste selected ({0})"),
@@ -226,7 +231,10 @@ strings! {
         "Пока Clipvault не запущен, Win+V не работает вообще — держите автозапуск включённым.",
         "While Clipvault is not running Win+V does nothing — keep autostart on."
     ),
-    PopupAtCursor => ("Открывать окно у курсора мыши", "Open the popup at the mouse cursor"),
+    PopupAtCursor => (
+        "Открывать полное окно у курсора мыши (компактное всегда открывается у курсора)",
+        "Open the full window at the mouse cursor (the compact one always opens there)"
+    ),
     BtnMinimize => ("Свернуть в трей", "Minimise to tray"),
     BtnQuit => ("Закрыть приложение", "Quit Clipvault"),
     Autostart => ("Запускать при входе в Windows", "Start with Windows"),

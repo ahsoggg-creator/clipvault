@@ -57,6 +57,7 @@ pub fn run(sh: &Shared, msg_hwnd: HWND) {
     let lang = sh.lang();
     platform::hide_popup();
     let target = sh.prev_foreground.load(Ordering::SeqCst) as HWND;
+    let copy_only = req.copy_only;
     let Some(p) = (match req.text {
         Some(text) => Some(Payload {
             text,
@@ -67,7 +68,7 @@ pub fn run(sh: &Shared, msg_hwnd: HWND) {
         return;
     };
 
-    if winclip::window_alive(target) {
+    if !copy_only && winclip::window_alive(target) {
         // SAFETY: plain handle.
         unsafe { SetForegroundWindow(target) };
         let deadline = Instant::now() + Duration::from_millis(600);
@@ -80,8 +81,8 @@ pub fn run(sh: &Shared, msg_hwnd: HWND) {
         platform::notify(format!("{}: {e}", S::PasteFailed.get(lang)));
         return;
     }
-    if !winclip::window_alive(target) {
-        return; // nothing to paste into: the entry is on the clipboard
+    if copy_only || !winclip::window_alive(target) {
+        return; // nothing to paste into (or only a copy was asked for): the entry is on the clipboard
     }
     if !winclip::self_elevated() && winclip::window_elevated(target) {
         diag::info("paste target runs elevated: UIPI blocks synthetic keys");

@@ -84,6 +84,13 @@ impl App {
 
     pub(crate) fn compact_footer(&mut self, ui: &mut Ui) {
         let lang = self.shared.lang();
+        self.compact_status_line(ui, lang);
+        ui.add_space(2.0);
+        self.compact_tools(ui, lang);
+    }
+
+    /// One line: what the selection can do, a message, or the hints.
+    fn compact_status_line(&mut self, ui: &mut Ui, lang: Lang) {
         if !self.popup.marked.is_empty() {
             ui.horizontal(|ui| {
                 let label = fmt(S::PasteSelected, lang, &[&self.popup.marked.len().to_string()]);
@@ -103,6 +110,56 @@ impl App {
             self.popup.toast = None;
             ui.add(egui::Label::new(RichText::new(S::CompactHints.get(lang)).weak().small()).wrap());
         }
+    }
+
+    /// Pause / incognito switches and "clear everything" (asks first).
+    fn compact_tools(&mut self, ui: &mut Ui, lang: Lang) {
+        if self.popup.confirm_clear {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(S::ClearConfirm.get(lang)).color(theme::BAD));
+                for (label, keep) in [(S::ClearKeepPinned, true), (S::ClearEverything, false)] {
+                    if ui.button(RichText::new(label.get(lang)).color(theme::BAD)).clicked() {
+                        self.clear_everything(keep);
+                    }
+                }
+                if ui.button(S::Cancel.get(lang)).clicked() {
+                    self.popup.confirm_clear = false;
+                }
+            });
+            return;
+        }
+        let (paused, incognito) = (
+            self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).paused,
+            self.shared.incognito.load(Ordering::Relaxed),
+        );
+        ui.horizontal_wrapped(|ui| {
+            let pause = if paused { S::Resume } else { S::PauseRecording };
+            if ui
+                .selectable_label(paused, RichText::new(pause.get(lang)).small())
+                .clicked()
+            {
+                let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                st.paused = !st.paused;
+                st.save();
+                drop(st);
+                platform::post(platform::WM_REHOTKEY);
+            }
+            if ui
+                .selectable_label(incognito, RichText::new(S::Incognito.get(lang)).small())
+                .clicked()
+            {
+                self.shared.incognito.fetch_xor(true, Ordering::SeqCst);
+                platform::settings_changed(&self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .button(RichText::new(S::ClearAll.get(lang)).small().color(theme::BAD))
+                    .clicked()
+                {
+                    self.popup.confirm_clear = true;
+                }
+            });
+        });
     }
 
     pub(crate) fn compact_list(&mut self, ui: &mut Ui, now: u64) {
@@ -218,6 +275,15 @@ fn hover_preview(
         _ => {
             let text: String = item.text.chars().take(700).collect();
             ui.add(egui::Label::new(RichText::new(text).monospace().small()).wrap());
+            let counts = fmt(
+                S::CharsLines,
+                lang,
+                &[
+                    &item.text.chars().count().to_string(),
+                    &item.text.lines().count().to_string(),
+                ],
+            );
+            ui.label(RichText::new(counts).weak().small());
         }
     }
 }

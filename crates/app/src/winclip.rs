@@ -325,6 +325,15 @@ pub fn clear_if_text(owner: HWND, hash: &str) -> bool {
     true
 }
 
+/// Empties the clipboard whatever it holds.
+pub fn empty(owner: HWND) -> bool {
+    let Some(_clip) = Clipboard::open(owner) else {
+        return false;
+    };
+    // SAFETY: the clipboard is open.
+    unsafe { EmptyClipboard() != 0 }
+}
+
 fn hdrop_files() -> Vec<String> {
     // SAFETY: the clipboard is open; CF_HDROP data is a valid HDROP while it is.
     unsafe {
