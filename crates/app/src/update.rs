@@ -8,6 +8,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -49,16 +50,49 @@ struct Release {
     sum_url: String,
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(120)))
-        .tls_config(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
-                .build(),
-        )
-        .build()
-        .into()
+/// No overall deadline: a slow connection must be able to finish a 17 MB download. Every phase has its own limit
+/// instead, so a dead connection is still given up on quickly.
+fn agent(via_proxy: bool) -> Option<ureq::Agent> {
+    let proxy = if via_proxy {
+        Some(ureq::Proxy::try_from_env()?)
+    } else {
+        None
+    };
+    Some(
+        ureq::Agent::config_builder()
+            .proxy(proxy)
+            .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_send_request(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(Duration::from_secs(45)))
+            .timeout_recv_body(Some(Duration::from_secs(20 * 60)))
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .provider(ureq::tls::TlsProvider::NativeTls)
+                    .build(),
+            )
+            .build()
+            .into(),
+    )
+}
+
+/// GET with a fallback between routes: straight to GitHub first (a proxy that is set up for other tools often
+/// cannot reach it), then through the proxy from the environment.
+fn get(url: &str, json: bool) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let mut last = None;
+    for via_proxy in [false, true] {
+        let Some(a) = agent(via_proxy) else { continue };
+        let mut req = a.get(url).header("User-Agent", &ua());
+        if json {
+            req = req.header("Accept", "application/vnd.github+json");
+        }
+        match req.call() {
+            Ok(r) => return Ok(r),
+            // GitHub answered: another route would not change what it said
+            Err(e @ ureq::Error::StatusCode(_)) => return Err(e),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or(ureq::Error::ConnectionFailed))
 }
 
 fn ua() -> String {
@@ -92,15 +126,10 @@ pub fn checksum_for(sums: &str, name: &str) -> Option<String> {
 }
 
 fn latest() -> Result<Release, String> {
-    let mut resp = agent()
-        .get(API)
-        .header("User-Agent", &ua())
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| match e {
-            ureq::Error::StatusCode(404) => "на GitHub пока нет релизов".to_owned(),
-            e => format!("GitHub недоступен: {e}"),
-        })?;
+    let mut resp = get(API, true).map_err(|e| match e {
+        ureq::Error::StatusCode(404) => "на GitHub пока нет релизов".to_owned(),
+        e => format!("GitHub недоступен: {e}"),
+    })?;
     let text = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let tag = v["tag_name"].as_str().ok_or("в ответе GitHub нет tag_name")?;
@@ -144,27 +173,11 @@ fn dir_writable(dir: &Path) -> bool {
     ok
 }
 
-fn download(rel: &Release, state: &Shared, repaint: &dyn Fn()) -> Result<(), String> {
-    let exe = target_exe()?;
-    let tmp = exe.with_extension("exe.download");
-
-    let sum_text = agent()
-        .get(&rel.sum_url)
-        .header("User-Agent", &ua())
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| e.to_string())?;
-    let expected = checksum_for(&sum_text, EXE_ASSET).ok_or("в SHA256SUMS.txt нет суммы для Clipvault.exe")?;
-
-    let mut resp = agent()
-        .get(&rel.exe_url)
-        .header("User-Agent", &ua())
-        .call()
-        .map_err(|e| e.to_string())?;
+/// One try at downloading the exe into `tmp`; returns the SHA-256 of what was written.
+fn fetch_exe(rel: &Release, tmp: &Path, state: &Shared, repaint: &dyn Fn()) -> Result<String, String> {
+    let mut resp = get(&rel.exe_url, false).map_err(|e| e.to_string())?;
     let mut reader = resp.body_mut().as_reader();
-    let mut file = std::fs::File::create(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let mut file = std::fs::File::create(tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 256 * 1024];
     let mut done = 0u64;
@@ -184,9 +197,33 @@ fn download(rel: &Release, state: &Shared, repaint: &dyn Fn()) -> Result<(), Str
         repaint();
     }
     file.sync_all().map_err(|e| e.to_string())?;
-    drop(file);
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
 
-    let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+fn download(rel: &Release, state: &Shared, repaint: &dyn Fn()) -> Result<(), String> {
+    let exe = target_exe()?;
+    let tmp = exe.with_extension("exe.download");
+
+    let sum_text = get(&rel.sum_url, false)
+        .map_err(|e| e.to_string())?
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    let expected = checksum_for(&sum_text, EXE_ASSET).ok_or("в SHA256SUMS.txt нет суммы для Clipvault.exe")?;
+
+    // a connection that drops half-way is tried again from the start
+    let mut attempt = 0;
+    let got = loop {
+        attempt += 1;
+        match fetch_exe(rel, &tmp, state, repaint) {
+            Ok(h) => break h,
+            Err(e) if attempt >= 3 => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+            Err(_) => std::thread::sleep(Duration::from_secs(2)),
+        }
+    };
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
         return Err("контрольная сумма не совпала — обновление отменено".into());
