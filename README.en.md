@@ -20,7 +20,7 @@ stays on your computer: no cloud, no sync, no telemetry.
 - **Pasting that behaves:** Clipvault gives the focus back to the window you opened the list from and presses
   `Ctrl+V` there. If that window runs as administrator Windows does not allow it (UIPI) — and the program says so.
 
-## Features (version 0.1.0)
+## Features (version 0.2.0)
 
 - **What it remembers:** text, rich text (HTML/RTF), images, file lists (`CF_HDROP`), colors (`#HEX`, `rgb()`,
   `hsl()` — with a color preview), links and paths; for each entry the program, the window title and the time.
@@ -29,6 +29,14 @@ stays on your computer: no cloud, no sync, no telemetry.
 - **A popup on `Ctrl+Alt+V`** (configurable; `Win+V` is reserved by Windows): instant fuzzy search as you type,
   filters by type, application and date, a preview, pasting with `Enter` or a digit `1–9`, pinning (`Ctrl+P`),
   deleting (`Ctrl+D`), "Clear all".
+- **Secret protection (0.2.0).** Before anything is written to disk Clipvault looks for secrets: keys and tokens
+  (`sk-…`, `ghp_`/`github_pat_`, `AKIA…`, `xox…`, JWT), private keys (`-----BEGIN … PRIVATE KEY-----`), connection
+  strings, BIP-39 seed phrases, card numbers (Luhn), password-looking strings (adjustable sensitivity) and your own
+  regular expressions. A recognised secret gets one of three policies: **do not store**, **keep in memory only and wipe
+  from the clipboard after N seconds** (30 by default) or **store, but masked**. Details [below](#secret-protection).
+- **Obeys the apps' own flags** (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`,
+  `CanUploadToCloudClipboard = 0`, `Clipboard Viewer Ignore`) and a **process blacklist** (KeePass, KeePassXC,
+  Bitwarden, 1Password, Dashlane by default): such copies never become entries.
 - **Limits:** entry size, retention period, number of entries (pinned entries are exempt).
 - **Pause and "incognito mode"** — from the window and from the tray icon menu.
 - **Administrator window.** The normal copy cannot paste into windows running as administrator; for those there
@@ -42,9 +50,13 @@ stays on your computer: no cloud, no sync, no telemetry.
 | --- | --- |
 | ![Search](docs/screenshots/02-search.png) | ![Image](docs/screenshots/03-image.png) |
 
-| Color | Settings |
+| Color | A memory-only secret (hidden) |
 | --- | --- |
-| ![Color](docs/screenshots/04-color.png) | ![Settings](docs/screenshots/05-settings.png) |
+| ![Color](docs/screenshots/04-color.png) | ![Secret](docs/screenshots/05-secret.png) |
+
+| Settings | Secret protection |
+| --- | --- |
+| ![Settings](docs/screenshots/06-settings.png) | ![Secrets](docs/screenshots/07-secrets.png) |
 
 Speed was measured on synthetic data (50,000 entries): fuzzy search over the whole history takes a median of
 17–37 ms; details and the method are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) (Russian).
@@ -115,8 +127,32 @@ writes a new encrypted file and swaps it in.
 - remnants on an SSD: the file is rebuilt after a deletion, but old blocks with ciphertext may survive being
   overwritten (they are useless without the key).
 
-A secrets filter (passwords, keys, seed phrases) is **not** in this version: whatever you copy goes into the
-history. If you copy a password, turn on incognito mode or pause.
+The content of secrets, the clipboard and entries **never** reaches the log, crash reports or diagnostics: only
+types and counters (for example "secret recognised: ApiKey, policy MemoryOnly").
+
+## Secret protection
+
+What is recognised (everything is local, before anything is written to disk):
+
+| Type | How |
+| --- | --- |
+| Keys and tokens | `sk-…` (OpenAI/Anthropic), `ghp_…`/`gho_…`/`github_pat_…`, `AKIA…`/`ASIA…` (AWS), `xox…` (Slack), `AIza…` (Google), `sk_live_…` (Stripe), JWT |
+| Private keys | the `-----BEGIN … PRIVATE KEY-----` header |
+| Connection strings | `postgres://user:password@host`, `mongodb+srv://…`, `Server=…;Password=…` |
+| BIP-39 seed phrases | 12/15/18/21/24 words from the list; with a valid checksum it is a "valid" phrase, with a bad one (a typo) it still counts as a secret because every word is from the list |
+| Card numbers | 13–19 digits (spaces and dashes allowed), Luhn checksum and a plausible leading range (Visa, Mastercard, Amex, Mir, UnionPay…) — phone numbers and long IDs do not trigger it |
+| Password-looking strings | one "word" without spaces: entropy, character classes, length; it does not trigger on links, paths, e-mail, UUIDs, hashes, versions, colors, `camelCase` identifiers; sensitivity: off / low / medium (default) / high |
+| Your patterns | any regular expressions (one per line in Settings) |
+
+**Policy** (one for all types): "do not store"; "keep in memory only" — the entry shows hidden in the list
+(`•••••••• [API key]`, a "Show" button), is never written to disk and disappears on exit, and the secret is wiped from
+the Windows clipboard after the set time **if the clipboard still holds it**; "store, but masked" — only
+`•••••••• [type]` goes to disk, the original is not stored.
+
+**What this does not guarantee.** The filter is a heuristic: a password that does not look like one gets through; an
+ordinary string that looks like one may be taken for a secret (lower the sensitivity). Wiping the clipboard does not
+undo another program having read it earlier. The apps' flags and the blacklist are checked **before** the clipboard
+content is read.
 
 ## Diagnostics
 
@@ -143,7 +179,7 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1 # checks, build, (s
 Layout:
 
 - `crates/core` — all the logic without a UI: the encrypted store, the history, de-duplication, search,
-  classification, clipboard formats, settings, the localisation table; tests;
+  classification, secret detectors, clipboard formats, settings, the localisation table; tests;
 - `crates/app` — the egui GUI, the Windows listener window (clipboard, hotkey, tray), pasting, the installer,
   auto-update, diagnostics, the demo mode;
 - `crates/cli` — `clipvault-cli list | search | get | purge`.
@@ -156,6 +192,11 @@ Recreate the screenshots (made-up data, nothing real is read or written):
 ```powershell
 Clipvault.exe --screenshots docs\screenshots
 ```
+
+## Third-party data
+
+The BIP-39 word list (`crates/core/src/bip39_en.txt`) comes from [bitcoin/bips](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
+(BSD-2-Clause); the file's SHA-256 is `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
 
 ## License
 

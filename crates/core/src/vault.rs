@@ -361,6 +361,7 @@ mod tests {
             count: 1,
             pinned: false,
             masked: false,
+            secret: None,
             volatile: false,
         }
     }

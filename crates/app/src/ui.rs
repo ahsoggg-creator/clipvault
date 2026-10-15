@@ -64,6 +64,12 @@ pub struct Popup {
     scroll_to_selected: bool,
     pub focus_search: bool,
     pub toast: Option<(String, Instant)>,
+    /// The memory-only secret whose text the user chose to show.
+    pub revealed: Option<u64>,
+    pub custom_text: String,
+    pub blacklist_text: String,
+    pub texts_loaded: bool,
+    pub scroll_to_secrets: bool,
 }
 
 impl Default for Popup {
@@ -87,6 +93,11 @@ impl Default for Popup {
             scroll_to_selected: false,
             focus_search: true,
             toast: None,
+            revealed: None,
+            custom_text: String::new(),
+            blacklist_text: String::new(),
+            texts_loaded: false,
+            scroll_to_secrets: false,
         }
     }
 }
@@ -105,6 +116,8 @@ impl Popup {
         self.confirm_clear = false;
         self.capture_hotkey = false;
         self.selected = None;
+        self.revealed = None;
+        self.texts_loaded = false;
         self.scroll_to_selected = true;
         self.focus_search = true;
     }
@@ -690,6 +703,17 @@ impl App {
                     ui.label(&item.text);
                 }
             }
+            _ if item.volatile && self.popup.revealed != Some(item.id) => {
+                let lang = self.shared.lang();
+                let mask = item
+                    .secret
+                    .map_or_else(|| "••••••••".to_owned(), |k| clipvault_core::guard::mask_text(k, lang));
+                ui.label(RichText::new(mask).monospace().size(16.0));
+                ui.add_space(6.0);
+                if ui.button(S::Reveal.get(lang)).clicked() {
+                    self.popup.revealed = Some(item.id);
+                }
+            }
             Kind::Files => {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for line in item.text.lines() {
@@ -770,6 +794,9 @@ fn row(
                 .to_owned();
             format!("{first}  ({} {})", S::FilesLabel.get(lang), n.saturating_sub(1))
         }
+        _ if item.volatile => item
+            .secret
+            .map_or_else(|| "••••••••".to_owned(), |k| clipvault_core::guard::mask_text(k, lang)),
         _ => one_line(&item.text, 90),
     };
     let right = format!(
@@ -859,7 +886,13 @@ fn meta_grid(ui: &mut Ui, item: &Item, now: u64, lang: Lang, shared: &crate::sha
                 ),
             );
             line(S::Repeats, item.count.to_string());
-            line(S::Size, human_size((item.text.len() as u64).max(item.blob_len)));
+            // the size of a hidden secret would reveal its length
+            let size = if item.volatile {
+                "—".to_owned()
+            } else {
+                human_size((item.text.len() as u64).max(item.blob_len))
+            };
+            line(S::Size, size);
         });
 }
 

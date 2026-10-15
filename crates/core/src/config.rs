@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::guard::{SecretPolicy, default_blacklist};
 use crate::history::Limits;
+use crate::secrets::Sensitivity;
 
 /// `CLIPVAULT_DATA_DIR` overrides the folder (tests, portable use); otherwise `%APPDATA%\Clipvault`.
 pub fn data_dir() -> Option<PathBuf> {
@@ -46,6 +48,20 @@ pub struct Settings {
     pub max_age_days: u32,
     /// Keep at most this many unpinned entries (0 = unlimited).
     pub max_items: u32,
+    /// Look for secrets before anything is written.
+    pub secrets_enabled: bool,
+    /// What happens to a recognised secret.
+    pub secret_policy: SecretPolicy,
+    /// With `MemoryOnly`: wipe the clipboard after this many seconds (if it still holds the secret).
+    pub secret_clear_secs: u32,
+    /// How eagerly single strings are taken for passwords.
+    pub password_sensitivity: Sensitivity,
+    /// The user's own regular expressions for secrets.
+    pub custom_patterns: Vec<String>,
+    /// Obey `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`, ...
+    pub respect_app_flags: bool,
+    /// Programs whose copies are never recorded (by executable name).
+    pub blacklist: Vec<String>,
 }
 
 impl Default for Settings {
@@ -60,6 +76,13 @@ impl Default for Settings {
             max_item_kb: 16 * 1024,
             max_age_days: 0,
             max_items: 0,
+            secrets_enabled: true,
+            secret_policy: SecretPolicy::MemoryOnly,
+            secret_clear_secs: 30,
+            password_sensitivity: Sensitivity::Medium,
+            custom_patterns: Vec::new(),
+            respect_app_flags: true,
+            blacklist: default_blacklist(),
         }
     }
 }
