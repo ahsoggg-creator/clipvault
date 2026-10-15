@@ -1,6 +1,6 @@
 [package]
 name = "clipvault-app"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ahsoggg-creator/clipvault"
@@ -10,7 +10,7 @@ name = "Clipvault"
 path = "src/main.rs"
 
 [dependencies]
-clipvault-core = { version = "0.2.0", path = "../core" }
+clipvault-core = { version = "0.3.0", path = "../core" }
 eframe = "0.36.2"
 png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -22,4 +22,4 @@ ureq = { version = "3.4.2", default-features = false, features = ["native-tls", 
 embed-resource = "3.0.12"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_SystemServices", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_SystemServices", "Win32_Storage_FileSystem", "Win32_System_SystemInformation"] }

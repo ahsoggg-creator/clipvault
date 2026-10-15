@@ -7,6 +7,7 @@ use clipvault_core::classify::parse_color;
 use clipvault_core::clipfmt;
 use clipvault_core::config::Lang;
 use clipvault_core::i18n::{S, fmt};
+use clipvault_core::transform::Transform;
 use clipvault_core::{Item, Kind, Query, now_unix};
 use eframe::egui::{
     self, Align, Align2, Color32, FontId, Key, Layout, Modifiers, RichText, Sense, TextureHandle, TextureOptions, Ui,
@@ -31,6 +32,7 @@ pub enum DateFilter {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
     History,
+    Snippets,
     Settings,
 }
 
@@ -70,6 +72,12 @@ pub struct Popup {
     pub blacklist_text: String,
     pub texts_loaded: bool,
     pub scroll_to_secrets: bool,
+    pub scroll_to_hotkeys: bool,
+    pub snip_query: String,
+    pub snip_draft: crate::snippets_ui::SnipDraft,
+    pub snip_editing: bool,
+    /// The snippet whose keyword is typed in the search box right now.
+    pub keyword_snippet: Option<(u64, String)>,
 }
 
 impl Default for Popup {
@@ -98,6 +106,11 @@ impl Default for Popup {
             blacklist_text: String::new(),
             texts_loaded: false,
             scroll_to_secrets: false,
+            scroll_to_hotkeys: false,
+            snip_query: String::new(),
+            snip_draft: Default::default(),
+            snip_editing: false,
+            keyword_snippet: None,
         }
     }
 }
@@ -144,6 +157,29 @@ pub fn human_size(bytes: u64) -> String {
         0..1024 => format!("{bytes} B"),
         1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.0),
         _ => format!("{:.1} MB", bytes as f64 / 1_048_576.0),
+    }
+}
+
+pub fn transform_label(t: Transform) -> S {
+    match t {
+        Transform::JsonFormat => S::TrJsonFormat,
+        Transform::JsonMinify => S::TrJsonMinify,
+        Transform::Base64Encode => S::TrBase64Enc,
+        Transform::Base64Decode => S::TrBase64Dec,
+        Transform::UrlEncode => S::TrUrlEnc,
+        Transform::UrlDecode => S::TrUrlDec,
+        Transform::LayoutEnToRu => S::TrLayoutEnRu,
+        Transform::LayoutRuToEn => S::TrLayoutRuEn,
+        Transform::LayoutAuto => S::TrLayoutAuto,
+        Transform::ExtractLinks => S::TrLinks,
+        Transform::ExtractEmails => S::TrEmails,
+        Transform::Upper => S::TrUpper,
+        Transform::Lower => S::TrLower,
+        Transform::Title => S::TrTitle,
+        Transform::Trim => S::TrTrim,
+        Transform::SortLines => S::TrSort,
+        Transform::SortLinesDesc => S::TrSortDesc,
+        Transform::UniqueLines => S::TrUnique,
     }
 }
 
@@ -237,8 +273,31 @@ impl App {
             self.popup.toast = Some(("Демо: вставка отключена".into(), Instant::now()));
             return;
         }
-        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest { id });
+        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest { id, text: None });
         platform::post(platform::WM_PASTE);
+    }
+
+    /// Pastes this text (a transformed entry, an expanded snippet) into the window the popup was opened from.
+    pub fn request_paste_text(&mut self, text: String) {
+        if self.shared.demo {
+            self.popup.toast = Some(("Демо: вставка отключена".into(), Instant::now()));
+            return;
+        }
+        *self.shared.paste.lock().unwrap_or_else(|e| e.into_inner()) = Some(PasteRequest {
+            id: 0,
+            text: Some(text),
+        });
+        platform::post(platform::WM_PASTE);
+    }
+
+    fn apply_transform(&mut self, t: Transform, text: &str) {
+        let lang = self.shared.lang();
+        match t.apply(text) {
+            Ok(out) => self.request_paste_text(out),
+            Err(e) => {
+                self.popup.toast = Some((format!("{}: {e}", S::TransformFailed.get(lang)), Instant::now()));
+            }
+        }
     }
 
     fn pin_selected(&mut self) {
@@ -298,7 +357,9 @@ impl App {
         if up {
             self.move_selection(-1);
         }
-        if enter && let Some(id) = self.popup.selected {
+        if enter && let Some((sid, _)) = self.popup.keyword_snippet.clone() {
+            self.paste_snippet(sid);
+        } else if enter && let Some(id) = self.popup.selected {
             self.request_paste(id);
         }
         if let Some(n) = digit
@@ -353,8 +414,19 @@ impl App {
         }
 
         self.refresh_results(now);
+        self.popup.keyword_snippet = {
+            let q = self.popup.query.trim();
+            (!q.is_empty())
+                .then(|| {
+                    let h = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+                    h.snippet_by_keyword(q).map(|s| (s.id, s.name.clone()))
+                })
+                .flatten()
+        };
         if self.popup.view == View::History {
             self.keys(&ctx);
+        } else if self.popup.view == View::Snippets && ctx.input(|i| i.key_pressed(Key::Escape)) {
+            platform::hide_popup();
         }
 
         egui::Panel::top("header").show(ui, |ui| self.header(ui));
@@ -363,6 +435,7 @@ impl App {
             View::Settings => {
                 egui::CentralPanel::default().show(ui, |ui| self.settings_ui(ui));
             }
+            View::Snippets => self.snippets_ui(ui),
             View::History => {
                 egui::Panel::left("list")
                     .resizable(false)
@@ -385,6 +458,13 @@ impl App {
                 ui.add(egui::Image::new(icon).fit_to_exact_size(vec2(22.0, 22.0)));
             }
             ui.label(RichText::new("Clipvault").strong().size(16.0));
+            for (view, label) in [(View::History, S::TabHistory), (View::Snippets, S::TabSnippets)] {
+                if self.popup.view != View::Settings
+                    && ui.selectable_label(self.popup.view == view, label.get(lang)).clicked()
+                {
+                    self.popup.view = view;
+                }
+            }
             if self.shared.admin {
                 theme::badge(ui, S::AdminBadge.get(lang), theme::BAD);
             }
@@ -455,6 +535,9 @@ impl App {
         if self.popup.focus_search {
             search.request_focus();
             self.popup.focus_search = false;
+        }
+        if let Some((_, name)) = &self.popup.keyword_snippet {
+            ui.label(RichText::new(clipvault_core::i18n::fmt(S::SnipKeywordHint, lang, &[name])).color(theme::GOOD));
         }
         ui.horizontal_wrapped(|ui| {
             if theme::chip(ui, S::All.get(lang), self.popup.kind.is_none(), theme::ACCENT).clicked() {
@@ -639,6 +722,16 @@ impl App {
         ui.horizontal(|ui| {
             if theme::primary_button(ui, S::Paste.get(lang)).clicked() {
                 self.request_paste(id);
+            }
+            if !matches!(item.kind, Kind::Image) {
+                ui.menu_button(S::TransformMenu.get(lang), |ui| {
+                    for t in Transform::ALL {
+                        if ui.button(transform_label(t).get(lang)).clicked() {
+                            self.apply_transform(t, &item.text);
+                            ui.close();
+                        }
+                    }
+                });
             }
             let pin = if item.pinned { S::Unpin } else { S::Pin };
             if ui.button(pin.get(lang)).clicked() {

@@ -34,7 +34,6 @@ jobs:
   e2e:
     needs: build
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Rust stable
@@ -46,3 +45,26 @@ jobs:
         timeout-minutes: 10
         shell: pwsh
         run: .\scripts\e2e.ps1
+
+  # README screenshots from the demo data (made-up entries), rendered on a clean machine so that nobody has to
+  # watch windows pop up on their own desktop. The files are an artifact: download and commit them.
+  screenshots:
+    needs: build
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust stable
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: Render the demo screenshots
+        timeout-minutes: 10
+        shell: pwsh
+        run: .\scripts\screenshots.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: docs/screenshots/*.png
+          retention-days: 7

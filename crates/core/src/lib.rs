@@ -16,7 +16,9 @@ pub mod i18n;
 pub mod model;
 pub mod search;
 pub mod secrets;
+pub mod snippets;
 pub mod timefmt;
+pub mod transform;
 pub mod vault;
 
 pub use error::{Error, Result};

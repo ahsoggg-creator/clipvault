@@ -88,6 +88,8 @@ impl App {
             ui.add_space(6.0);
             self.sec_general(ui, lang);
             ui.add_space(8.0);
+            self.sec_hotkeys(ui, lang);
+            ui.add_space(8.0);
             self.sec_secrets(ui, lang);
             ui.add_space(8.0);
             self.sec_limits(ui, lang);
@@ -159,6 +161,86 @@ impl App {
                 }
             }
         });
+    }
+
+    fn sec_hotkeys(&mut self, ui: &mut Ui, lang: Lang) {
+        use clipvault_core::config::TransformHotkey;
+        use clipvault_core::hotkey::parse_hotkey;
+        use clipvault_core::transform::Transform;
+        let card = crate::theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(S::PlainHotkey.get(lang)).strong());
+            let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            let mut reregister = false;
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::TextEdit::singleline(&mut st.plain_paste_hotkey).desired_width(180.0));
+                if r.changed() {
+                    st.save();
+                }
+                if r.lost_focus() {
+                    reregister = true;
+                }
+                if !st.plain_paste_hotkey.trim().is_empty() && parse_hotkey(&st.plain_paste_hotkey).is_none() {
+                    ui.label(RichText::new(S::HotkeyInvalid.get(lang)).color(crate::theme::BAD));
+                }
+            });
+            ui.label(RichText::new(S::PlainNote.get(lang)).weak().small());
+            ui.add_space(6.0);
+            ui.label(RichText::new(S::TransformHotkeys.get(lang)).strong());
+            let mut remove: Option<usize> = None;
+            for (i, th) in st.transform_hotkeys.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut th.hotkey)
+                            .desired_width(150.0)
+                            .id_salt(("th", i)),
+                    );
+                    let bad = !th.hotkey.trim().is_empty() && parse_hotkey(&th.hotkey).is_none();
+                    if r.lost_focus() {
+                        reregister = true;
+                    }
+                    let current = Transform::parse(&th.transform);
+                    egui::ComboBox::from_id_salt(("tt", i))
+                        .selected_text(current.map_or("?", |t| crate::ui::transform_label(t).get(lang)))
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            for t in Transform::ALL {
+                                if ui
+                                    .selectable_label(current == Some(t), crate::ui::transform_label(t).get(lang))
+                                    .clicked()
+                                {
+                                    th.transform = t.name().to_owned();
+                                    reregister = true;
+                                }
+                            }
+                        });
+                    if bad {
+                        ui.label(RichText::new(S::HotkeyInvalid.get(lang)).color(crate::theme::BAD));
+                    }
+                    if ui.button(S::Remove.get(lang)).clicked() {
+                        remove = Some(i);
+                    }
+                });
+            }
+            if let Some(i) = remove {
+                st.transform_hotkeys.remove(i);
+                reregister = true;
+            }
+            if ui.button(S::AddRow.get(lang)).clicked() {
+                st.transform_hotkeys.push(TransformHotkey {
+                    hotkey: String::new(),
+                    transform: Transform::Trim.name().to_owned(),
+                });
+            }
+            st.save();
+            drop(st);
+            if reregister {
+                platform::post(platform::WM_REHOTKEY);
+            }
+        });
+        if std::mem::take(&mut self.popup.scroll_to_hotkeys) {
+            ui.scroll_to_rect(card.response.rect, Some(egui::Align::TOP));
+        }
     }
 
     fn sec_secrets(&mut self, ui: &mut Ui, lang: Lang) {

@@ -20,7 +20,7 @@ stays on your computer: no cloud, no sync, no telemetry.
 - **Pasting that behaves:** Clipvault gives the focus back to the window you opened the list from and presses
   `Ctrl+V` there. If that window runs as administrator Windows does not allow it (UIPI) — and the program says so.
 
-## Features (version 0.2.0)
+## Features (version 0.3.0)
 
 - **What it remembers:** text, rich text (HTML/RTF), images, file lists (`CF_HDROP`), colors (`#HEX`, `rgb()`,
   `hsl()` — with a color preview), links and paths; for each entry the program, the window title and the time.
@@ -37,6 +37,15 @@ stays on your computer: no cloud, no sync, no telemetry.
 - **Obeys the apps' own flags** (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`,
   `CanUploadToCloudClipboard = 0`, `Clipboard Viewer Ignore`) and a **process blacklist** (KeePass, KeePassXC,
   Bitwarden, 1Password, Dashlane by default): such copies never become entries.
+- **Paste without formatting (0.3.0)** on `Ctrl+Shift+V` (configurable): only the text is pasted and the previous
+  clipboard content is put back afterwards. ⚠ The hotkey is taken **globally**, and in some apps `Ctrl+Shift+V` already
+  means the same thing (browsers, Word, terminals): if it gets in the way, change it in Settings.
+- **Quick transformations (0.3.0)** — from the "Transform" menu in the window and by hotkeys (clipboard text →
+  transformation → paste the result, the clipboard is restored): JSON format/minify, Base64, URL, EN↔RU keyboard
+  layout switch, extracting links and e-mails, case, whitespace trimming, sorting and de-duplicating lines.
+  Details [below](#transformations-and-snippets).
+- **Snippets (0.3.0):** folders and tags, a keyword, a hotkey, placeholders `{date}`, `{time}`, `{clipboard}`; pinned
+  entries are listed in the "Snippets" tab.
 - **Limits:** entry size, retention period, number of entries (pinned entries are exempt).
 - **Pause and "incognito mode"** — from the window and from the tray icon menu.
 - **Administrator window.** The normal copy cannot paste into windows running as administrator; for those there
@@ -44,7 +53,7 @@ stays on your computer: no cloud, no sync, no telemetry.
   pastes and records nothing; the main copy never runs elevated.
 - **A no-admin installer**, auto-update with SHA-256 verification, a log and crash reports without clipboard
   content, a demo mode, a Russian and English interface.
-- **`clipvault-cli`:** `list`, `search`, `get <id>`, `purge`.
+- **`clipvault-cli`:** `list`, `search`, `get <id>`, `transform <name>` (stdin → stdout), `purge`.
 
 | Search and filters | Image preview |
 | --- | --- |
@@ -54,9 +63,15 @@ stays on your computer: no cloud, no sync, no telemetry.
 | --- | --- |
 | ![Color](docs/screenshots/04-color.png) | ![Secret](docs/screenshots/05-secret.png) |
 
-| Settings | Secret protection |
+| Snippets | A snippet by keyword |
 | --- | --- |
-| ![Settings](docs/screenshots/06-settings.png) | ![Secrets](docs/screenshots/07-secrets.png) |
+| ![Snippets](docs/screenshots/06-snippets.png) | ![Keyword](docs/screenshots/10-keyword.png) |
+
+| Hotkeys | Secret protection |
+| --- | --- |
+| ![Hotkeys](docs/screenshots/08-hotkeys.png) | ![Secrets](docs/screenshots/09-secrets.png) |
+
+![Settings](docs/screenshots/07-settings.png)
 
 Speed was measured on synthetic data (50,000 entries): fuzzy search over the whole history takes a median of
 17–37 ms; details and the method are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) (Russian).
@@ -153,6 +168,32 @@ the Windows clipboard after the set time **if the clipboard still holds it**; "s
 ordinary string that looks like one may be taken for a secret (lower the sensitivity). Wiping the clipboard does not
 undo another program having read it earlier. The apps' flags and the blacklist are checked **before** the clipboard
 content is read.
+
+## Transformations and snippets
+
+Every transformation is a pure function in `crates/core` with a test table; the same names work in the console:
+`clipvault-cli transform <name>` reads stdin and writes stdout (`--list` shows them), and on an error (invalid JSON,
+say) prints a clear message with line and column and exits with code 1.
+
+| Name | What it does |
+| --- | --- |
+| `json-format` / `json-minify` | formats / compacts JSON (key order is kept) |
+| `base64-encode` / `base64-decode` | Base64 (decoding ignores whitespace, `=` is optional, the result must be UTF-8 text) |
+| `url-encode` / `url-decode` | percent-encoding of UTF-8 |
+| `layout-en-ru` / `layout-ru-en` / `layout-auto` | wrong keyboard layout: `ghbdtn` ↔ `привет` (the QWERTY ↔ ЙЦУКЕН key table, both ways; `auto` picks the direction from the letters) |
+| `extract-links` / `extract-emails` | every link / address in the text, without repeats |
+| `upper` / `lower` / `title` | case |
+| `trim` | strip whitespace around lines and blank lines at the ends |
+| `sort` / `sort-desc` / `unique` | sort lines, drop repeats |
+
+`Ctrl+Alt+J` (format JSON) and `Ctrl+Alt+L` (layout, auto) are assigned by default; add your own in Settings. How it
+works: the clipboard text is taken, transformed and **pasted** into the window that has the focus, after which the
+previous clipboard content is put back. If the transformation fails nothing is pasted — a notification explains why.
+
+**Snippets** live in the same encrypted store. A snippet has a name, a folder, tags, a keyword, a hotkey and text with
+placeholders: `{date}` (`2026-10-15`), `{time}` (`18:04`, local time), `{clipboard}` (the current clipboard text). Paste
+one by its hotkey, from the "Snippets" tab, or by keyword: type it in the history search box and press `Enter`.
+Clearing the history leaves snippets alone.
 
 ## Diagnostics
 

@@ -13,6 +13,8 @@ pub const ROW_HOVER: Color32 = Color32::from_rgb(44, 48, 66);
 pub const ROW_SELECTED: Color32 = Color32::from_rgb(58, 52, 112);
 
 pub fn install(ctx: &egui::Context) {
+    // the palette is dark: do not follow a light Windows theme into unreadable text
+    ctx.set_theme(egui::ThemePreference::Dark);
     ctx.set_visuals(egui::Visuals::dark());
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = vec2(8.0, 6.0);

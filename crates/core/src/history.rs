@@ -8,6 +8,7 @@ use crate::dedup::content_hash;
 use crate::error::{Error, Result};
 use crate::model::{Added, BlobKind, Item, Kind, NewItem, Reject};
 use crate::search::fuzzy_score;
+use crate::snippets::Snippet;
 use crate::vault::{CONFLICT, Delta, Entry, Event, Vault};
 
 const DAY: u64 = 86_400;
@@ -70,6 +71,7 @@ pub struct History {
     mem_blobs: HashMap<u64, Vec<u8>>,
     next_id: u64,
     rev: u64,
+    snippets: HashMap<u64, Snippet>,
 }
 
 fn lower_of(item: &Item) -> String {
@@ -90,6 +92,7 @@ impl History {
             mem_blobs: HashMap::new(),
             next_id: 1,
             rev: 0,
+            snippets: HashMap::new(),
         }
     }
 
@@ -155,6 +158,13 @@ impl History {
                     self.remove(id);
                 }
             }
+            Event::SnipPut { snippet } => {
+                self.next_id = self.next_id.max(snippet.id + 1);
+                self.snippets.insert(snippet.id, snippet);
+            }
+            Event::SnipDelete { id } => {
+                self.snippets.remove(&id);
+            }
             Event::Unknown => {}
         }
     }
@@ -181,6 +191,7 @@ impl History {
             Delta::Reloaded(events) => {
                 self.slots.retain(|_, s| s.item.volatile);
                 self.by_hash.retain(|_, id| self.slots.contains_key(id));
+                self.snippets.clear();
                 for e in events {
                     self.apply(e);
                 }
@@ -382,6 +393,58 @@ impl History {
             .collect()
     }
 
+    /// All snippets, by folder then name.
+    pub fn snippets(&self) -> Vec<&Snippet> {
+        let mut v: Vec<&Snippet> = self.snippets.values().collect();
+        v.sort_by_key(|s| (s.folder.to_lowercase(), s.name.to_lowercase(), s.id));
+        v
+    }
+
+    pub fn snippet(&self, id: u64) -> Option<&Snippet> {
+        self.snippets.get(&id)
+    }
+
+    /// The snippet whose keyword is exactly `word` (case-insensitive).
+    pub fn snippet_by_keyword(&self, word: &str) -> Option<&Snippet> {
+        let w = word.trim().to_lowercase();
+        (!w.is_empty())
+            .then(|| {
+                self.snippets
+                    .values()
+                    .find(|s| !s.keyword.is_empty() && s.keyword.to_lowercase() == w)
+            })
+            .flatten()
+    }
+
+    /// Distinct folders, sorted.
+    pub fn snippet_folders(&self) -> Vec<String> {
+        let mut f: Vec<String> = self
+            .snippets
+            .values()
+            .map(|s| s.folder.clone())
+            .filter(|f| !f.is_empty())
+            .collect();
+        f.sort_by_key(|s| s.to_lowercase());
+        f.dedup();
+        f
+    }
+
+    /// Saves a snippet (id 0 = a new one) and returns its id.
+    pub fn put_snippet(&mut self, mut snippet: Snippet, now: u64) -> Result<u64> {
+        if snippet.id == 0 {
+            snippet.id = self.next_id;
+        }
+        snippet.updated = now;
+        let id = snippet.id;
+        self.commit(Event::SnipPut { snippet }, None)?;
+        Ok(id)
+    }
+
+    pub fn delete_snippet(&mut self, id: u64) -> Result<()> {
+        self.commit(Event::SnipDelete { id }, None)?;
+        self.compact()
+    }
+
     pub fn pin(&mut self, id: u64, pinned: bool) -> Result<()> {
         match self.slots.get(&id) {
             Some(s) if !s.item.volatile => self.commit(Event::Pin { id, pinned }, None),
@@ -472,6 +535,12 @@ impl History {
                 blob,
             });
         }
+        let mut snips: Vec<&Snippet> = self.snippets.values().collect();
+        snips.sort_by_key(|s| s.id);
+        entries.extend(snips.into_iter().map(|s| Entry {
+            event: Event::SnipPut { snippet: s.clone() },
+            blob: None,
+        }));
         let events = self.vault.as_mut().expect("checked above").rewrite(entries)?;
         for e in events {
             if let Event::Put { item } = e
@@ -664,5 +733,43 @@ mod tests {
         assert_eq!(h.len(), 2);
         let h2 = History::open(dir.path(), &key).unwrap();
         assert_eq!(h2.len(), 1);
+    }
+
+    #[test]
+    fn snippets_survive_restart_compaction_and_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = random_bytes();
+        let id = {
+            let mut h = History::open(dir.path(), &key).unwrap();
+            let s = Snippet {
+                name: "Sig".into(),
+                text: "Best, {date}".into(),
+                folder: "Mail".into(),
+                keyword: "sig".into(),
+                ..Default::default()
+            };
+            let id = h.put_snippet(s, 10).unwrap();
+            let gone = h
+                .put_snippet(
+                    Snippet {
+                        name: "tmp".into(),
+                        ..Default::default()
+                    },
+                    11,
+                )
+                .unwrap();
+            h.delete_snippet(gone).unwrap();
+            h.add(text("an entry"), 12, &lim()).unwrap();
+            h.clear(false).unwrap(); // clearing the history leaves snippets alone
+            id
+        };
+        let h = History::open(dir.path(), &key).unwrap();
+        assert!(h.is_empty());
+        assert_eq!(h.snippets().len(), 1);
+        let s = h.snippet(id).unwrap();
+        assert_eq!((s.name.as_str(), s.folder.as_str(), s.updated), ("Sig", "Mail", 10));
+        assert_eq!(h.snippet_by_keyword(" SIG ").map(|s| s.id), Some(id));
+        assert_eq!(h.snippet_by_keyword("other"), None);
+        assert_eq!(h.snippet_folders(), vec!["Mail".to_string()]);
     }
 }

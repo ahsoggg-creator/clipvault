@@ -9,8 +9,8 @@ use clipvault_core::guard::{ClipFlags, dword_value};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows_sys::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardOwner, IsClipboardFormatAvailable, OpenClipboard,
-    RegisterClipboardFormatW, SetClipboardData,
+    CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardOwner,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 use windows_sys::Win32::System::Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT};
@@ -236,6 +236,74 @@ pub fn read_content(owner: HWND) -> Option<Content> {
         c.files = hdrop_files();
     }
     Some(c)
+}
+
+/// Everything that was on the clipboard (the formats that live in global memory), to put back later.
+pub struct Snapshot(Vec<(u32, Vec<u8>)>);
+
+/// Copies the clipboard's memory-backed formats. Bitmap handles are skipped: Windows makes them from the DIB.
+pub fn snapshot(owner: HWND) -> Option<Snapshot> {
+    let _clip = Clipboard::open(owner)?;
+    let mut out = Vec::new();
+    let mut fmt = 0u32;
+    loop {
+        // SAFETY: the clipboard is open.
+        fmt = unsafe { EnumClipboardFormats(fmt) };
+        if fmt == 0 {
+            break;
+        }
+        let handle_only =
+            matches!(fmt, 2 | 3 | 9 | 14) || (0x80..=0x8F).contains(&fmt) || (0x200..=0x3FF).contains(&fmt);
+        if handle_only {
+            continue;
+        }
+        if let Some(bytes) = global_bytes(fmt) {
+            out.push((fmt, bytes));
+        }
+    }
+    Some(Snapshot(out))
+}
+
+/// Puts a snapshot back (with the internal marker, so Clipvault does not record the restoration).
+pub fn restore(owner: HWND, snap: &Snapshot) -> bool {
+    let Some(_clip) = Clipboard::open(owner) else {
+        return false;
+    };
+    // SAFETY: the clipboard is open.
+    unsafe { EmptyClipboard() };
+    let mut ok = true;
+    for (fmt, bytes) in &snap.0 {
+        ok &= put(*fmt, bytes);
+    }
+    put(formats().marker, &[1]);
+    ok
+}
+
+/// The plain text on the clipboard right now.
+pub fn read_text(owner: HWND) -> Option<String> {
+    let _clip = Clipboard::open(owner)?;
+    if !available(CF_UNICODETEXT.into()) {
+        return None;
+    }
+    global_bytes(CF_UNICODETEXT.into()).map(|b| wide_text(&b))
+}
+
+/// Local date and time for the snippet placeholders.
+pub fn local_clock() -> clipvault_core::snippets::Clock {
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: SYSTEMTIME is plain data filled by the call.
+    let t = unsafe {
+        let mut t = std::mem::zeroed();
+        GetLocalTime(&mut t);
+        t
+    };
+    clipvault_core::snippets::Clock {
+        year: i32::from(t.wYear),
+        month: u32::from(t.wMonth),
+        day: u32::from(t.wDay),
+        hour: u32::from(t.wHour),
+        minute: u32::from(t.wMinute),
+    }
 }
 
 /// Empties the clipboard if it still holds exactly this plain text (compared by its BLAKE3 hash).
