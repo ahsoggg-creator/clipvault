@@ -131,6 +131,38 @@ try {
         Remove-Item $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
         $env:LOCALAPPDATA = $realLocal
     }
+
+    Write-Host "limits and pause (settings.json in a fresh data folder)"
+    function Run-With-Settings($json, [scriptblock]$body) {
+        Get-Process Clipvault -ErrorAction SilentlyContinue | Stop-Process -Force
+        $d = Join-Path $env:TEMP ("clipvault-e2e-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+        New-Item -ItemType Directory $d | Out-Null
+        Set-Content -Path (Join-Path $d "settings.json") -Value $json -Encoding utf8
+        $prev = $env:CLIPVAULT_DATA_DIR
+        $env:CLIPVAULT_DATA_DIR = $d
+        $a = Start-Process $Exe -ArgumentList "--background" -PassThru
+        Start-Sleep 3
+        try { & $body } finally {
+            Stop-Process $a -Force -ErrorAction SilentlyContinue
+            $env:CLIPVAULT_DATA_DIR = $prev
+            Start-Sleep -Milliseconds 400
+            Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Run-With-Settings '{"max_item_kb": 1}' {
+        Set-Clipboard -Value ("big " * 600)       # about 2.4 KB: over the 1 KB limit
+        Start-Sleep -Milliseconds 800
+        Set-Clipboard -Value "small entry"
+        Start-Sleep -Milliseconds 900
+        $l = & $Cli list 2>&1 | Out-String
+        Check "an entry over the size limit is not stored, a small one is" (($l -match "small entry") -and -not ($l -match "big big"))
+    }
+    Run-With-Settings '{"paused": true}' {
+        Set-Clipboard -Value "must not be recorded"
+        Start-Sleep -Milliseconds 1200
+        $l = (& $Cli list 2>&1 | Out-String).Trim()
+        Check "paused recording stores nothing" ($l -eq "")
+    }
 }
 finally {
     Get-Process Clipvault -ErrorAction SilentlyContinue | Stop-Process -Force
