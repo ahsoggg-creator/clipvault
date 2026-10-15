@@ -21,7 +21,7 @@ jobs:
           $v = (Select-String -Path crates\app\Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           if ("v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} does not match Cargo.toml version $v" }
           if (-not (Test-Path "docs\release-notes\${{ github.ref_name }}.md")) { throw "docs\release-notes\${{ github.ref_name }}.md is missing" }
-      - name: Format, lint, test, build, package (never signs: the private key stays on the author's machine)
+      - name: "Format, lint, test, build, package (never signs - the private key stays on the author machine)"
         shell: pwsh
         run: .\scripts\release.ps1
       - name: Publish release
