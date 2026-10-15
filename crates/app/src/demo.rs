@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use clipvault_core::clipfmt::{Rgba, png_encode};
 use clipvault_core::config::Lang;
 use clipvault_core::guard::mask_text;
+use clipvault_core::snippets::Snippet;
 use clipvault_core::{BlobKind, History, Kind, Limits, NewItem, SecretKind};
 use eframe::egui::{self, Event, ViewportCommand};
 
@@ -20,7 +21,9 @@ use crate::ui::View;
 const SETTLE: Duration = Duration::from_millis(1400);
 
 /// What the screenshot tour does, in order.
-const STEPS: [&str; 7] = ["history", "search", "image", "color", "secret", "settings", "secrets"];
+const STEPS: [&str; 10] = [
+    "history", "search", "image", "color", "secret", "snippets", "settings", "hotkeys", "secrets", "keyword",
+];
 
 pub struct Demo {
     dir: Option<PathBuf>,
@@ -222,6 +225,60 @@ pub fn history(now: u64) -> History {
         mins(33),
         &lim,
     );
+    // snippets (invented)
+    let snip = |name: &str, folder: &str, tags: &[&str], keyword: &str, hotkey: &str, text: &str| Snippet {
+        name: name.into(),
+        folder: folder.into(),
+        tags: tags.iter().map(|t| (*t).to_owned()).collect(),
+        keyword: keyword.into(),
+        hotkey: hotkey.into(),
+        text: text.into(),
+        ..Default::default()
+    };
+    for s in [
+        snip(
+            "Подпись в письме",
+            "Почта",
+            &["работа"],
+            "sig",
+            "Ctrl+Alt+1",
+            "С уважением,\nИван Петров\nОтдел поддержки",
+        ),
+        snip(
+            "Дата для заметки",
+            "Почта",
+            &["дата"],
+            "dt",
+            "",
+            "Заметка от {date}, {time}",
+        ),
+        snip(
+            "Ответ клиенту",
+            "Поддержка",
+            &["клиенты", "шаблон"],
+            "thx",
+            "Ctrl+Alt+2",
+            "Здравствуйте!\nСпасибо за обращение, вернёмся с ответом сегодня.\n\n{clipboard}",
+        ),
+        snip(
+            "Адрес офиса",
+            "Поддержка",
+            &["адрес"],
+            "addr",
+            "",
+            "г. Новая Земля, ул. Примерная, д. 1, офис 12",
+        ),
+        snip(
+            "SQL: активные клиенты",
+            "Разработка",
+            &["sql"],
+            "sqlc",
+            "",
+            "SELECT id, name FROM customers WHERE active = 1;",
+        ),
+    ] {
+        let _ = h.put_snippet(s, now);
+    }
     let _ = (milk, h.pin(addr, true));
     h
 }
@@ -260,6 +317,29 @@ impl App {
                         .find(|i| i.volatile)
                         .map(|i| i.id)
                 };
+            }
+            "snippets" => {
+                self.popup.view = View::Snippets;
+                let first = self
+                    .shared
+                    .history
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .snippets()
+                    .into_iter()
+                    .find(|s| s.name.starts_with("Ответ"))
+                    .cloned();
+                if let Some(s) = first {
+                    self.popup.snip_draft = crate::snippets_ui::SnipDraft::from(&s);
+                    self.popup.snip_editing = true;
+                }
+            }
+            "hotkeys" => {
+                self.popup.view = View::Settings;
+                self.popup.scroll_to_hotkeys = true;
+            }
+            "keyword" => {
+                self.popup.query = "thx".into();
             }
             "settings" => self.popup.view = View::Settings,
             "secrets" => {

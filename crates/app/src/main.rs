@@ -13,6 +13,7 @@ mod paste;
 mod platform;
 mod settings_ui;
 mod shared;
+mod snippets_ui;
 mod theme;
 mod ui;
 mod update;
