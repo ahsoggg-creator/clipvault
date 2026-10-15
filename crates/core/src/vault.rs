@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{Cipher, MasterKey};
 use crate::error::{Error, Result};
 use crate::model::Item;
+use crate::snippets::Snippet;
 
 const MAGIC: &[u8; 8] = b"CLIPVLT1";
 const HEADER: u64 = 16;
@@ -47,6 +48,12 @@ pub enum Event {
     },
     Clear {
         keep_pinned: bool,
+    },
+    SnipPut {
+        snippet: Snippet,
+    },
+    SnipDelete {
+        id: u64,
     },
     /// Written by a newer version; skipped.
     #[serde(other)]

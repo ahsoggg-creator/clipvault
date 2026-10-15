@@ -62,6 +62,17 @@ pub struct Settings {
     pub respect_app_flags: bool,
     /// Programs whose copies are never recorded (by executable name).
     pub blacklist: Vec<String>,
+    /// Pastes the clipboard as plain text and puts the previous clipboard content back afterwards.
+    pub plain_paste_hotkey: String,
+    /// Hotkeys that transform the clipboard text and paste the result.
+    pub transform_hotkeys: Vec<TransformHotkey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransformHotkey {
+    pub hotkey: String,
+    /// A name from `Transform::name`, e.g. `json-format`.
+    pub transform: String,
 }
 
 impl Default for Settings {
@@ -83,6 +94,17 @@ impl Default for Settings {
             custom_patterns: Vec::new(),
             respect_app_flags: true,
             blacklist: default_blacklist(),
+            plain_paste_hotkey: "Ctrl+Shift+V".into(),
+            transform_hotkeys: vec![
+                TransformHotkey {
+                    hotkey: "Ctrl+Alt+J".into(),
+                    transform: "json-format".into(),
+                },
+                TransformHotkey {
+                    hotkey: "Ctrl+Alt+L".into(),
+                    transform: "layout-auto".into(),
+                },
+            ],
         }
     }
 }
