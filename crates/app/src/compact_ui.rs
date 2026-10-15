@@ -49,7 +49,7 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if theme::icon_button(ui, Icon::Close, S::Close.get(lang)).clicked() {
-                    platform::hide_popup();
+                    platform::close_popup();
                 }
                 if theme::icon_button(ui, Icon::Gear, S::TraySettings.get(lang)).clicked() {
                     self.popup.view = View::Settings;

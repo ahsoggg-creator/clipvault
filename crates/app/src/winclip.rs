@@ -18,8 +18,8 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_LWIN,
-    VK_MENU, VK_RWIN, VK_SHIFT,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput,
+    VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows_sys::Win32::UI::Shell::DragQueryFileW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -426,13 +426,17 @@ pub fn set_clipboard(owner: HWND, p: &Payload) -> Result<(), String> {
 }
 
 fn key_input(vk: u16, up: bool) -> INPUT {
+    key_input_flags(vk, up, 0)
+}
+
+fn key_input_flags(vk: u16, up: bool, extra: u32) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk,
                 wScan: 0,
-                dwFlags: if up { KEYEVENTF_KEYUP } else { 0 },
+                dwFlags: extra | if up { KEYEVENTF_KEYUP } else { 0 },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -455,13 +459,22 @@ pub fn wait_modifiers_released(ms: u64) {
 }
 
 /// Types Ctrl+V into the foreground window. Returns false if Windows refused the input.
-pub fn send_ctrl_v() -> bool {
-    let inputs = [
-        key_input(VK_CONTROL, false),
-        key_input(u16::from(b'V'), false),
-        key_input(u16::from(b'V'), true),
-        key_input(VK_CONTROL, true),
-    ];
+pub fn send_paste(shift_insert: bool) -> bool {
+    let inputs = if shift_insert {
+        [
+            key_input(VK_SHIFT, false),
+            key_input_flags(VK_INSERT, false, KEYEVENTF_EXTENDEDKEY),
+            key_input_flags(VK_INSERT, true, KEYEVENTF_EXTENDEDKEY),
+            key_input(VK_SHIFT, true),
+        ]
+    } else {
+        [
+            key_input(VK_CONTROL, false),
+            key_input(u16::from(b'V'), false),
+            key_input(u16::from(b'V'), true),
+            key_input(VK_CONTROL, true),
+        ]
+    };
     // SAFETY: `inputs` is a valid array of INPUT structures of the stated size.
     let sent = unsafe {
         SendInput(

@@ -490,7 +490,7 @@ impl App {
             } else if self.popup.view == View::Settings {
                 self.popup.view = View::History;
             } else if !self.shared.demo {
-                platform::hide_popup();
+                platform::close_popup();
             }
         }
     }
@@ -522,7 +522,10 @@ impl App {
             && self.popup.view == View::History
             && self.popup.drag.is_none()
             // with "close after pasting" off the window stays up: the paste itself takes the focus away
-            && self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).close_after_paste
+            && {
+                let st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+                st.close_after_paste && st.close_on_blur
+            }
         {
             platform::hide_popup();
             self.popup.was_focused = false;
@@ -544,7 +547,7 @@ impl App {
             && self.popup.capturing.is_none()
             && ctx.input(|i| i.key_pressed(Key::Escape))
         {
-            platform::hide_popup();
+            platform::close_popup();
         }
 
         let compact =
@@ -646,10 +649,10 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // closing only hides the window: the app keeps running in the tray, whose menu has "Exit"
                 if ui.button("×").on_hover_text(S::BtnCloseWindow.get(lang)).clicked() && !self.shared.demo {
-                    platform::hide_popup();
+                    platform::close_popup();
                 }
                 if ui.button("—").on_hover_text(S::BtnMinimize.get(lang)).clicked() && !self.shared.demo {
-                    platform::hide_popup();
+                    platform::close_popup();
                 }
                 let label = if self.popup.view == View::Settings {
                     S::Back

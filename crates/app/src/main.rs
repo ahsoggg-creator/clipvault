@@ -107,7 +107,7 @@ impl App {
             && !self.shared.quit.load(Ordering::SeqCst)
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            platform::hide_popup();
+            platform::close_popup();
         }
         let ready = matches!(
             *self.update.lock().unwrap_or_else(|e| e.into_inner()),

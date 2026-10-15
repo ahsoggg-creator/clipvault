@@ -94,7 +94,8 @@ pub fn run(sh: &Shared, msg_hwnd: HWND) {
     }
     winclip::wait_modifiers_released(400);
     std::thread::sleep(Duration::from_millis(30));
-    if !winclip::send_ctrl_v() {
+    let shift_insert = sh.settings.lock().unwrap_or_else(|e| e.into_inner()).paste_shift_insert;
+    if !winclip::send_paste(shift_insert) {
         diag::warn("SendInput was refused");
         platform::notify(S::PasteFailed.get(lang));
     }
@@ -120,7 +121,7 @@ pub fn paste_text_temporarily(sh: &Shared, msg_hwnd: HWND, text: &str) -> Result
         },
     )?;
     std::thread::sleep(Duration::from_millis(40));
-    let sent = winclip::send_ctrl_v();
+    let sent = winclip::send_paste(sh.settings.lock().unwrap_or_else(|e| e.into_inner()).paste_shift_insert);
     // give the target time to read the clipboard before it changes back
     std::thread::sleep(Duration::from_millis(450));
     if let Some(s) = saved {

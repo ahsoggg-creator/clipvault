@@ -41,6 +41,8 @@ pub enum CompactPosition {
     Corner,
     /// Where the user last dragged it.
     Last,
+    /// Next to the text caret of the window that had the focus (the mouse cursor when that window has none).
+    Caret,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,10 +100,25 @@ pub struct Settings {
     pub compact_offset: (i32, i32),
     /// The window closes after an entry is pasted (off: it stays open for pasting several entries).
     pub close_after_paste: bool,
+    /// Where the compact window's top-left corner sits relative to the text caret (its top-left), in logical points.
+    pub caret_offset: (i32, i32),
+    /// Size of the compact window in logical points.
+    pub compact_size: (u32, u32),
+    /// Gap to the screen edge for the "corner" position, in logical points.
+    pub compact_margin: u32,
+    /// Closing the window without pasting gives the focus back to the window (and the input field) it came from.
+    pub restore_focus_on_close: bool,
+    /// The window closes when it loses the focus (a click outside, Alt+Tab).
+    pub close_on_blur: bool,
+    /// Paste with Shift+Insert instead of Ctrl+V (some terminals only understand that).
+    pub paste_shift_insert: bool,
 }
 
 /// The compact window centred under the cursor, 16 points down: the starting offset.
 pub const DEFAULT_COMPACT_OFFSET: (i32, i32) = (-190, 16);
+/// Just above the caret, so that the input field it belongs to stays visible.
+pub const DEFAULT_CARET_OFFSET: (i32, i32) = (-10, -556);
+pub const DEFAULT_COMPACT_SIZE: (u32, u32) = (380, 540);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransformHotkey {
@@ -148,6 +165,12 @@ impl Default for Settings {
             autostart_default_applied: false,
             compact_offset: DEFAULT_COMPACT_OFFSET,
             close_after_paste: true,
+            caret_offset: DEFAULT_CARET_OFFSET,
+            compact_size: DEFAULT_COMPACT_SIZE,
+            compact_margin: 12,
+            restore_focus_on_close: true,
+            close_on_blur: true,
+            paste_shift_insert: false,
         }
     }
 }
@@ -212,6 +235,9 @@ mod tests {
         assert_eq!(s.compact_position, CompactPosition::Cursor);
         assert_eq!(s.compact_offset, DEFAULT_COMPACT_OFFSET);
         assert!(s.close_after_paste);
+        assert_eq!(s.caret_offset, DEFAULT_CARET_OFFSET);
+        assert_eq!(s.compact_size, DEFAULT_COMPACT_SIZE);
+        assert!(s.restore_focus_on_close && s.close_on_blur && !s.paste_shift_insert);
         let s: Settings = serde_json::from_str(r#"{"compact_position":"last","compact_last":[-1900,40]}"#).unwrap();
         assert_eq!(
             (s.compact_position, s.compact_last),

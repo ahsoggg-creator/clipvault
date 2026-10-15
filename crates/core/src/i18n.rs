@@ -254,6 +254,29 @@ strings! {
         "Если выключить, окно остаётся открытым: можно вставить несколько записей подряд. Закрыть — Esc, «×» или повторное нажатие сочетания; само по себе оно не закроется.",
         "When off, the window stays open so that several entries can be pasted in a row. Close it with Esc, the cross or the hotkey; it does not close by itself."
     ),
+    PosCaret => (
+        "Возле места ввода текста (мигающая палочка в чате; настраивается ниже)",
+        "Near the text caret (the blinking bar in a chat; set it below)"
+    ),
+    CaretHint => (
+        "Каретка (место ввода) — в центре схемы. Перетащите окно туда, где оно должно появляться относительно неё. Если у программы нет видимой каретки, окно откроется у курсора мыши.",
+        "The text caret is in the middle of the diagram. Drag the window to where it should appear relative to it. If the program exposes no caret, the window opens at the mouse cursor."
+    ),
+    CaretValue => ("Смещение окна от каретки: {0}, {1}", "Window offset from the caret: {0}, {1}"),
+    CaretLabel => ("каретка", "caret"),
+    OffsetX => ("X", "X"),
+    OffsetY => ("Y", "Y"),
+    CompactSize => ("Размер компактного окна (ширина × высота)", "Compact window size (width × height)"),
+    CompactMargin => ("Отступ от края экрана в углу", "Gap to the screen edge in the corner"),
+    RestoreFocus => (
+        "После закрытия без вставки вернуть фокус в прежнее окно и поле ввода",
+        "After closing without pasting, give the focus back to the previous window and input field"
+    ),
+    CloseOnBlur => ("Закрывать окно, когда оно теряет фокус", "Close the window when it loses the focus"),
+    PasteShiftInsert => (
+        "Вставлять через Shift+Insert вместо Ctrl+V (для некоторых терминалов)",
+        "Paste with Shift+Insert instead of Ctrl+V (for some terminals)"
+    ),
     PosCenter => ("По центру экрана", "Center of the screen"),
     PosCorner => ("В правом нижнем углу", "Bottom-right corner"),
     PosLast => ("Там, где его оставили (перетащите окно)", "Where you left it (drag the window)"),

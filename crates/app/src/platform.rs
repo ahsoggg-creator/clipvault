@@ -11,7 +11,7 @@ use clipvault_core::i18n::S;
 use clipvault_core::transform::Transform;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
+    ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
 };
 use windows_sys::Win32::System::DataExchange::{
     AddClipboardFormatListener, GetClipboardSequenceNumber, RemoveClipboardFormatListener,
@@ -26,12 +26,12 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BringWindowToTop, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindowRect,
-    GetWindowThreadProcessId, HWND_TOPMOST, IMAGE_ICON, IsWindowVisible, LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED,
-    MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON,
-    SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowPos,
-    ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLIPBOARDUPDATE, WM_COMMAND, WM_DESTROY,
-    WM_HOTKEY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
+    DispatchMessageW, FindWindowW, GUITHREADINFO, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
+    GetSystemMetrics, GetWindowRect, GetWindowThreadProcessId, HWND_TOPMOST, IMAGE_ICON, IsWindowVisible,
+    LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    SetForegroundWindow, SetTimer, SetWindowPos, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP,
+    WM_CLIPBOARDUPDATE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 
 use crate::shared::Shared;
@@ -317,6 +317,74 @@ fn popup_hwnd() -> HWND {
     h
 }
 
+/// Closes the popup on purpose (the cross, Esc, the hotkey again) and, when the setting asks for it, gives the focus
+/// back to the window it came from, so typing can go on without a click into the input field.
+pub fn close_popup() {
+    let restore = sh()
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .restore_focus_on_close;
+    hide_popup();
+    if restore {
+        restore_focus();
+    }
+}
+
+fn restore_focus() {
+    let target = sh().prev_foreground.load(Ordering::SeqCst) as HWND;
+    // SAFETY: plain handles.
+    unsafe {
+        let tray = FindWindowW(wide("Shell_TrayWnd").as_ptr(), std::ptr::null());
+        if !crate::winclip::window_alive(target) || target == popup_hwnd() || target == tray {
+            return;
+        }
+        if SetForegroundWindow(target) == 0 || GetForegroundWindow() != target {
+            // another thread's window: borrow its input state for a moment
+            let cur_thread = GetCurrentThreadId();
+            let fg = GetForegroundWindow();
+            let fg_thread = if fg.is_null() {
+                0
+            } else {
+                GetWindowThreadProcessId(fg, std::ptr::null_mut())
+            };
+            let attached =
+                fg_thread != 0 && fg_thread != cur_thread && AttachThreadInput(cur_thread, fg_thread, 1) != 0;
+            SetForegroundWindow(target);
+            if attached {
+                AttachThreadInput(cur_thread, fg_thread, 0);
+            }
+        }
+        diag::info(format!(
+            "focus restored: is_foreground={}",
+            GetForegroundWindow() == target
+        ));
+    }
+}
+
+/// Where the text caret of the window `fg` is, in screen pixels (its top-left corner). Only programs that
+/// publish a system caret have one; for the others this is `None`.
+fn caret_point(fg: HWND) -> Option<POINT> {
+    if fg.is_null() {
+        return None;
+    }
+    // SAFETY: out-pointers to live locals; `cbSize` is set as the API requires.
+    unsafe {
+        let thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
+        let mut info: GUITHREADINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        if thread == 0 || GetGUIThreadInfo(thread, &mut info) == 0 || info.hwndCaret.is_null() {
+            return None;
+        }
+        let rc = info.rcCaret;
+        if rc.left == 0 && rc.top == 0 && rc.right == 0 && rc.bottom == 0 {
+            return None;
+        }
+        let mut p = POINT { x: rc.left, y: rc.top };
+        (ClientToScreen(info.hwndCaret, &mut p) != 0).then_some(p)
+    }
+}
+
 pub fn hide_popup() {
     capture_end();
     let h = popup_hwnd();
@@ -332,9 +400,8 @@ fn popup_open() -> bool {
     !h.is_null() && unsafe { IsWindowVisible(h) != 0 }
 }
 
-/// Size of the popup in logical points: the compact quick-paste shape and the full window.
+/// Size of the full window in logical points (the compact one is a setting).
 const FULL_SIZE: (f32, f32) = (980.0, 700.0);
-const COMPACT_SIZE: (f32, f32) = (380.0, 540.0);
 
 /// Physical pixels per logical point on the monitor the window is on.
 fn dpi_scale(h: HWND) -> f32 {
@@ -346,7 +413,12 @@ fn dpi_scale(h: HWND) -> f32 {
 /// The popup's size in physical pixels for the monitor the window is on now, never larger than the work area.
 fn popup_size_px(h: HWND, compact: bool, work: &RECT) -> (i32, i32) {
     let scale = dpi_scale(h);
-    let (w, hh) = if compact { COMPACT_SIZE } else { FULL_SIZE };
+    let (w, hh) = if compact {
+        let (cw, ch) = sh().settings.lock().unwrap_or_else(|e| e.into_inner()).compact_size;
+        (cw.clamp(260, 1200) as f32, ch.clamp(300, 1600) as f32)
+    } else {
+        FULL_SIZE
+    };
     (
         ((w * scale).round() as i32).min(work.right - work.left),
         ((hh * scale).round() as i32).min(work.bottom - work.top),
@@ -369,18 +441,26 @@ fn show_popup(compact: bool) {
         }
         let mut cur = POINT { x: 0, y: 0 };
         GetCursorPos(&mut cur);
-        let (at_cursor, position, last, offset) = {
+        let (at_cursor, position, last, offset, caret_offset, margin) = {
             let st = s.settings.lock().unwrap_or_else(|e| e.into_inner());
             (
                 st.popup_at_cursor,
                 st.compact_position,
                 st.compact_last,
                 st.compact_offset,
+                st.caret_offset,
+                st.compact_margin,
             )
         };
+        let caret = (compact && position == CompactPosition::Caret)
+            .then(|| caret_point(fg))
+            .flatten();
+        if compact && position == CompactPosition::Caret {
+            diag::info(format!("caret position: {:?}", caret.map(|c| (c.x, c.y))));
+        }
         // "where it was left" lives on the monitor it was left on; everything else follows the mouse
         let last = last.filter(|_| compact && position == CompactPosition::Last);
-        let anchor = last.map_or(cur, |(x, y)| POINT { x, y });
+        let anchor = last.map_or(caret.unwrap_or(cur), |(x, y)| POINT { x, y });
         let mon = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -398,12 +478,22 @@ fn show_popup(compact: bool) {
             );
             let (w, hh) = popup_size_px(h, compact, &r);
             let (x, y) = if compact {
-                match (position, last) {
-                    (CompactPosition::Center, _) => {
+                let gap = (margin as f32 * dpi_scale(h)).round() as i32;
+                match (position, last, caret) {
+                    (CompactPosition::Center, ..) => {
                         (r.left + (r.right - r.left - w) / 2, r.top + (r.bottom - r.top - hh) / 2)
                     }
-                    (CompactPosition::Corner, _) => ((r.right - w - 12).max(r.left), (r.bottom - hh - 12).max(r.top)),
-                    (CompactPosition::Last, Some((lx, ly))) => (
+                    (CompactPosition::Corner, ..) => {
+                        ((r.right - w - gap).max(r.left), (r.bottom - hh - gap).max(r.top))
+                    }
+                    (CompactPosition::Caret, _, Some(c)) => {
+                        let k = dpi_scale(h);
+                        (
+                            (c.x + (caret_offset.0 as f32 * k).round() as i32).clamp(r.left, (r.right - w).max(r.left)),
+                            (c.y + (caret_offset.1 as f32 * k).round() as i32).clamp(r.top, (r.bottom - hh).max(r.top)),
+                        )
+                    }
+                    (CompactPosition::Last, Some((lx, ly)), _) => (
                         lx.clamp(r.left, (r.right - w).max(r.left)),
                         ly.clamp(r.top, (r.bottom - hh).max(r.top)),
                     ),
@@ -487,7 +577,7 @@ pub fn set_compact(compact: bool) {
 fn toggle_popup() {
     // SAFETY: no pointers involved.
     if popup_open() && unsafe { GetForegroundWindow() } == popup_hwnd() {
-        hide_popup();
+        close_popup();
     } else {
         let compact = sh().settings.lock().unwrap_or_else(|e| e.into_inner()).compact_popup;
         show_popup(compact);

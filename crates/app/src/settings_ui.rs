@@ -187,6 +187,7 @@ impl App {
                     CompactPosition::Center => S::PosCenter,
                     CompactPosition::Corner => S::PosCorner,
                     CompactPosition::Last => S::PosLast,
+                    CompactPosition::Caret => S::PosCaret,
                 };
                 let before = cpos;
                 egui::ComboBox::from_id_salt("cpos")
@@ -196,6 +197,7 @@ impl App {
                             CompactPosition::Cursor,
                             CompactPosition::Center,
                             CompactPosition::Corner,
+                            CompactPosition::Caret,
                             CompactPosition::Last,
                         ] {
                             ui.selectable_value(&mut cpos, p, name(p).get(lang));
@@ -207,9 +209,10 @@ impl App {
                     st.save();
                 }
             });
-            if compact && cpos == CompactPosition::Cursor {
-                self.offset_editor(ui, lang);
+            if compact && matches!(cpos, CompactPosition::Cursor | CompactPosition::Caret) {
+                self.offset_editor(ui, lang, cpos == CompactPosition::Caret);
             }
+            self.compact_options(ui, lang, cpos == CompactPosition::Corner);
             let mut close = self
                 .shared
                 .settings
@@ -271,14 +274,66 @@ impl App {
         });
     }
 
-    /// A diagram of the screen around the mouse cursor: drag the little window to where it should open.
-    fn offset_editor(&mut self, ui: &mut Ui, lang: Lang) {
+    /// Size of the compact window, the corner gap and the behaviour around closing and pasting.
+    fn compact_options(&mut self, ui: &mut Ui, lang: Lang, corner: bool) {
+        let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+        let before = st.clone();
+        ui.horizontal(|ui| {
+            ui.label(S::CompactSize.get(lang));
+            ui.add(
+                egui::DragValue::new(&mut st.compact_size.0)
+                    .range(260..=1200)
+                    .suffix(" px"),
+            );
+            ui.label("×");
+            ui.add(
+                egui::DragValue::new(&mut st.compact_size.1)
+                    .range(300..=1600)
+                    .suffix(" px"),
+            );
+            if ui.small_button(S::OffsetReset.get(lang)).clicked() {
+                st.compact_size = clipvault_core::config::DEFAULT_COMPACT_SIZE;
+            }
+        });
+        if corner {
+            ui.horizontal(|ui| {
+                ui.label(S::CompactMargin.get(lang));
+                ui.add(
+                    egui::DragValue::new(&mut st.compact_margin)
+                        .range(0..=200)
+                        .suffix(" px"),
+                );
+            });
+        }
+        ui.checkbox(&mut st.restore_focus_on_close, S::RestoreFocus.get(lang));
+        ui.checkbox(&mut st.close_on_blur, S::CloseOnBlur.get(lang));
+        ui.checkbox(&mut st.paste_shift_insert, S::PasteShiftInsert.get(lang));
+        if *st != before {
+            st.save();
+        }
+    }
+
+    /// A diagram of the screen around the mouse cursor (or the text caret): drag the little window to where it
+    /// should open, or type the numbers.
+    fn offset_editor(&mut self, ui: &mut Ui, lang: Lang, caret: bool) {
         use eframe::egui::{Color32, CursorIcon, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
         // diagram scale: one logical point of the real window is K points here
-        const K: f32 = 0.3;
-        let (win_w, win_h) = (380.0 * K, 540.0 * K);
-        ui.label(RichText::new(S::OffsetHint.get(lang)).weak().small());
-        let (rect, _) = ui.allocate_exact_size(vec2(360.0, 260.0), Sense::hover());
+        const K: f32 = 0.2;
+        const REACH: i32 = 2500;
+        let size = self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .compact_size;
+        let (win_w, win_h) = (size.0 as f32 * K, size.1 as f32 * K);
+        let f = K / 0.3;
+        ui.label(
+            RichText::new(if caret { S::CaretHint } else { S::OffsetHint }.get(lang))
+                .weak()
+                .small(),
+        );
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().clamp(300.0, 560.0), 300.0), Sense::hover());
         let center = rect.center();
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 8.0, Color32::from_rgb(18, 19, 27));
@@ -287,26 +342,39 @@ impl App {
         p.line_segment([pos2(rect.left(), center.y), pos2(rect.right(), center.y)], faint);
         p.line_segment([pos2(center.x, rect.top()), pos2(center.x, rect.bottom())], faint);
 
-        let mut off = self
-            .shared
-            .settings
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .compact_offset;
+        let mut off = {
+            let st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            if caret { st.caret_offset } else { st.compact_offset }
+        };
+        let set = |off: (i32, i32), save: bool| {
+            let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
+            if caret {
+                st.caret_offset = off;
+            } else {
+                st.compact_offset = off;
+            }
+            if save {
+                st.save();
+            }
+        };
         let mut menu = Rect::from_min_size(center + vec2(off.0 as f32 * K, off.1 as f32 * K), vec2(win_w, win_h));
         // keep the window on the diagram, whatever the saved offset is
         let keep = |m: Rect| {
             Rect::from_min_size(
                 pos2(
-                    m.min.x.clamp(rect.left() + 2.0, rect.right() - win_w - 2.0),
-                    m.min.y.clamp(rect.top() + 2.0, rect.bottom() - win_h - 2.0),
+                    m.min
+                        .x
+                        .clamp(rect.left() + 2.0, (rect.right() - win_w - 2.0).max(rect.left() + 2.0)),
+                    m.min
+                        .y
+                        .clamp(rect.top() + 2.0, (rect.bottom() - win_h - 2.0).max(rect.top() + 2.0)),
                 ),
                 vec2(win_w, win_h),
             )
         };
         menu = keep(menu);
         let resp = ui
-            .interact(menu, ui.id().with("offset_menu"), Sense::drag())
+            .interact(menu, ui.id().with(("offset_menu", caret)), Sense::drag())
             .on_hover_cursor(CursorIcon::Grab);
         if resp.dragged() {
             menu = keep(menu.translate(resp.drag_delta()));
@@ -314,14 +382,10 @@ impl App {
                 ((menu.min.x - center.x) / K).round() as i32,
                 ((menu.min.y - center.y) / K).round() as i32,
             );
-            self.shared
-                .settings
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .compact_offset = off;
+            set(off, false);
         }
         if resp.drag_stopped() {
-            self.shared.settings.lock().unwrap_or_else(|e| e.into_inner()).save();
+            set(off, true);
         }
         let hot = resp.hovered() || resp.dragged();
         p.rect_filled(
@@ -332,49 +396,73 @@ impl App {
         p.rect_stroke(menu, 6.0, Stroke::new(1.5, crate::theme::ACCENT), StrokeKind::Inside);
         // a few rows, so that it reads as the quick-paste list
         p.rect_filled(
-            Rect::from_min_size(menu.min + vec2(8.0, 8.0), vec2(win_w - 16.0, 8.0)),
-            3.0,
+            Rect::from_min_size(menu.min + vec2(5.0, 5.0), vec2(win_w - 10.0, 5.0)),
+            2.0,
             Color32::from_white_alpha(70),
         );
         for i in 0..6 {
             p.rect_filled(
-                Rect::from_min_size(menu.min + vec2(8.0, 26.0 + i as f32 * 20.0), vec2(win_w - 16.0, 14.0)),
-                3.0,
+                Rect::from_min_size(
+                    menu.min + vec2(5.0, (26.0 + i as f32 * 20.0) * f),
+                    vec2(win_w - 10.0, 14.0 * f),
+                ),
+                2.0,
                 Color32::from_white_alpha(28),
             );
         }
-        // the mouse cursor, on top of everything
-        let arrow = vec![
-            center,
-            center + vec2(0.0, 17.0),
-            center + vec2(4.5, 13.0),
-            center + vec2(8.0, 20.0),
-            center + vec2(11.0, 18.5),
-            center + vec2(7.5, 11.5),
-            center + vec2(13.0, 11.0),
-        ];
-        p.add(egui::Shape::convex_polygon(
-            arrow,
-            Color32::WHITE,
-            Stroke::new(1.0, Color32::BLACK),
-        ));
+        // the anchor, on top of everything: the mouse cursor, or the bar that blinks where the text goes
+        if caret {
+            p.rect_filled(Rect::from_min_size(center, vec2(2.0, 16.0)), 0.0, Color32::WHITE);
+            p.rect_stroke(
+                Rect::from_min_size(center - vec2(1.0, 1.0), vec2(4.0, 18.0)),
+                1.0,
+                Stroke::new(1.0, Color32::BLACK),
+                StrokeKind::Outside,
+            );
+        } else {
+            let arrow = vec![
+                center,
+                center + vec2(0.0, 17.0),
+                center + vec2(4.5, 13.0),
+                center + vec2(8.0, 20.0),
+                center + vec2(11.0, 18.5),
+                center + vec2(7.5, 11.5),
+                center + vec2(13.0, 11.0),
+            ];
+            p.add(egui::Shape::convex_polygon(
+                arrow,
+                Color32::WHITE,
+                Stroke::new(1.0, Color32::BLACK),
+            ));
+        }
         p.text(
             center + vec2(18.0, 4.0),
             egui::Align2::LEFT_TOP,
-            S::CursorLabel.get(lang),
+            if caret { S::CaretLabel } else { S::CursorLabel }.get(lang),
             egui::FontId::proportional(11.0),
             Color32::from_gray(150),
         );
         ui.horizontal(|ui| {
-            ui.label(RichText::new(clipvault_core::i18n::fmt(
-                S::OffsetValue,
-                lang,
-                &[&off.0.to_string(), &off.1.to_string()],
-            )));
+            ui.label(S::OffsetX.get(lang));
+            let mut changed = ui
+                .add(egui::DragValue::new(&mut off.0).range(-REACH..=REACH).suffix(" px"))
+                .changed();
+            ui.label(S::OffsetY.get(lang));
+            changed |= ui
+                .add(egui::DragValue::new(&mut off.1).range(-REACH..=REACH).suffix(" px"))
+                .changed();
+            if changed {
+                set(off, true);
+            }
             if ui.button(S::OffsetReset.get(lang)).clicked() {
-                let mut st = self.shared.settings.lock().unwrap_or_else(|e| e.into_inner());
-                st.compact_offset = clipvault_core::config::DEFAULT_COMPACT_OFFSET;
-                st.save();
+                set(
+                    if caret {
+                        clipvault_core::config::DEFAULT_CARET_OFFSET
+                    } else {
+                        clipvault_core::config::DEFAULT_COMPACT_OFFSET
+                    },
+                    true,
+                );
             }
         });
     }
