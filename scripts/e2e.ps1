@@ -247,6 +247,62 @@ try {
         Start-Sleep -Milliseconds 1200
         Check "the same copy is recorded when the process is not blacklisted" ((& $Cli list 2>&1 | Out-String) -match "allowed process")
     }
+
+    Write-Host "transformations, paste without formatting, clipboard restore"
+    function Hotkey-Paste([scriptblock]$setClipboard, [byte[]]$mods, [byte]$key) {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = "e2e target 2"; $form.Width = 520; $form.Height = 260; $form.StartPosition = "CenterScreen"
+        $tb = New-Object System.Windows.Forms.TextBox
+        $tb.Dock = "Fill"; $tb.Multiline = $true
+        $form.Controls.Add($tb)
+        $script:s2 = 0; $script:out2 = ""
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 1000
+        $timer.Add_Tick({
+            switch ($script:s2) {
+                0 { $form.Activate(); [E2E.Win]::SetForegroundWindow($form.Handle) | Out-Null; $tb.Focus() | Out-Null; & $setClipboard }
+                1 { Press $mods $key }
+                4 { $script:out2 = $tb.Text; $timer.Stop(); $form.Close() }
+            }
+            $script:s2++
+        })
+        $form.Add_Shown({ $timer.Start() })
+        [void]$form.ShowDialog()
+        return $script:out2
+    }
+    $json = '{"b":1,"a":[1,2]}'
+    Run-With-Settings '{}' {
+        $t = Hotkey-Paste { Set-Clipboard -Value $json } @(0x11, 0x12) 0x4A       # Ctrl+Alt+J: JSON format
+        Check "hotkey: JSON is formatted and pasted" (($t -replace "`r", "") -eq ($json | & $Cli transform json-format)) "got [$t]"
+        Check "the previous clipboard text is back after the paste" ((Clip-Text).Trim() -eq $json) "clipboard [$(Clip-Text)]"
+        $t = Hotkey-Paste { Set-Clipboard -Value "ghbdtn vbh" } @(0x11, 0x12) 0x4C   # Ctrl+Alt+L: layout
+        Check "hotkey: wrong layout is switched (ghbdtn vbh)" ($t.Trim() -eq "привет мир") "got [$t]"
+        $t = Hotkey-Paste { Set-Clipboard -Value "{ not json" } @(0x11, 0x12) 0x4A
+        Check "hotkey: a failed transform pastes nothing" ($t -eq "") "got [$t]"
+    }
+    Run-With-Settings '{}' {
+        $before = (& $Cli list 2>&1 | Out-String)
+        $t = Hotkey-Paste {
+            $d = New-Object System.Windows.Forms.DataObject
+            $d.SetText("plain RICHBODY")
+            $d.SetData([System.Windows.Forms.DataFormats]::Html, "<html><body><b>RICHBODY</b></body></html>")
+            [System.Windows.Forms.Clipboard]::SetDataObject($d, $true)
+        } @(0x11, 0x10) 0x56                                                         # Ctrl+Shift+V
+        Check "Ctrl+Shift+V pastes the text without formatting" ($t.Trim() -eq "plain RICHBODY") "got [$t]"
+        Check "the formatted content is on the clipboard again afterwards" ([System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html))
+        $after = (& $Cli list 2>&1 | Out-String)
+        Check "restoring the clipboard is not recorded as a new entry" (([regex]::Matches($after, "RICHBODY")).Count -eq 1) $after
+    }
+
+    Write-Host "clipvault-cli transform (text in, text out)"
+    $c = { param($name, $in) ($in | & $Cli transform $name 2>&1 | Out-String).TrimEnd("`r", "`n") }
+    Check "cli: layout-auto ghbdtn -> привет" ((& $c "layout-auto" "ghbdtn") -eq "привет")
+    Check "cli: base64 round trip" ((& $c "base64-decode" (& $c "base64-encode" "привет мир")) -eq "привет мир")
+    Check "cli: url round trip" ((& $c "url-decode" (& $c "url-encode" "a b&c=d/é")) -eq "a b&c=d/é")
+    Check "cli: json-minify" ((& $c "json-minify" "{ `"a`" : [ 1, 2 ] }") -eq '{"a":[1,2]}')
+    Check "cli: unique" (((& $c "unique" "x`ny`nx") -replace "`r", "") -eq "x`ny")
+    $err = ("{bad" | & $Cli transform json-format 2>&1 | Out-String)
+    Check "cli: a JSON error is explained and fails" (($LASTEXITCODE -ne 0) -and ($err -match "JSON")) $err
 }
 finally {
     if ($script:fail -gt 0 -and (Test-Path "$data\logs\clipvault.log")) { Write-Host "--- app log tail ---"; Get-Content "$data\logs\clipvault.log" -Tail 12 }
